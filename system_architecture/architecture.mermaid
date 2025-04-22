@@ -1,0 +1,50 @@
+graph TD
+    subgraph "Frontend"
+        A[Video Player] --> B[Interactive Canvas]
+        B --> C[Annotation Tools]
+        C -->|Prompts| B
+        D[Timeline Controller] --> A
+        E[Export UI] --> F[Project Management]
+    end
+
+    subgraph "Backend Services"
+        G[API Gateway]
+        H[Authentication Service]
+        I[Video Processing Service]
+        J[SAM Inference Engine]
+        K[Temporal Tracking Service]
+        L[Export Service]
+    end
+
+    subgraph "Data Storage"
+        M[Video Database]
+        N[Annotation Database]
+        O[User Projects]
+    end
+
+    %% Frontend to Backend connections
+    B -->|Prompt requests| G
+    F -->|Project data| G
+    E -->|Export request| G
+
+    %% Backend internal connections
+    G --> H
+    H --> I
+    H --> J
+    H --> K
+    H --> L
+    I -->|Extracted frames| J
+    J -->|Frame masks| K
+    K -->|Temporal masks| L
+
+    %% Backend to Storage connections
+    I <-->|Video data| M
+    J <-->|Segmentation masks| N
+    K <-->|Tracking data| N
+    L -->|Export data| O
+    F <-->|User data| O
+
+    %% Data flow notations
+    A -.->|"Frame display"| B
+    J -.->|"Segmentation results"| B
+    K -.->|"Object tracking"| B
