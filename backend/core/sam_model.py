@@ -55,12 +55,17 @@ class SAMModel:
     def save_result(self, output_path: str):
         """WIP: Save the current segmentation result."""
 
-        # TODO-1000: save the mask and contours to a file
+        # TODO-100: save the mask and contours to a file
         if self.result_image is not None:
             cv2.imwrite(output_path, self.result_image)
             print(f"Saved segmentation to {output_path}")
         else:
             print("No segmentation to save")
+
+    def save_yolo_labels(self, image_path: str):
+        """WIP: Save the segmentation result in YOLO format."""
+        # TODO-10: Implement saving in YOLO format
+        pass
 
 
 
