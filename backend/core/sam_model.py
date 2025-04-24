@@ -8,13 +8,14 @@ class SAMModel:
     def __init__(self):
         """Initialize the application with the model path."""
         # Load the SAM model
+        # TODO-1000:loaded from a config file ?
         model_path = "../models/sam2.1_b.pt"
         self.model = SAM(model_path)
         print("Model loaded successfully!")
         
         # Track interaction points
         self.points = []  # (x, y) coordinates
-        self.labels = []  # 1 for foreground, 0 for background
+        self.labels = []  # 1 for foreground, 0 for background (we jest need foreground for now)
         self.result_image = None
         
     def add_point(self, x: int, y: int, label: int):
@@ -52,7 +53,7 @@ class SAMModel:
         print("Reset all points")
 
     def save_result(self, output_path: str):
-        """Save the current segmentation result."""
+        """WIP: Save the current segmentation result."""
 
         # TODO-1000: save the mask and contours to a file
         if self.result_image is not None:
@@ -60,6 +61,8 @@ class SAMModel:
             print(f"Saved segmentation to {output_path}")
         else:
             print("No segmentation to save")
+
+
 
 
 #example usage
