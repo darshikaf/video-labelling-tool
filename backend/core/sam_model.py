@@ -24,13 +24,13 @@ class SAMModel:
         self.labels = []  # 1 for foreground, 0 for background (we jest need foreground for now)
         self.result_image = None
         
-    def add_point(self, x: int, y: int, label: int=1):
+    def _add_point(self, x: int, y: int, label: int=1):
         """Add a new point with its label."""
         self.points.append((x, y))
         self.labels.append(label)
         print(f"Added {'foreground' if label == 1 else 'background'} point at ({x}, {y})")
         
-    def run_segmentation(self, image_frame: np.ndarray):
+    def _run_segmentation(self, image_frame: np.ndarray)->Optional[List[Dict]]:
         """Run the SAM model with the current points and return the segmentation results."""
         # Ensure that points and labels are the same length
         if len(self.points) != len(self.labels):
@@ -50,23 +50,32 @@ class SAMModel:
         except Exception as e:
             print(f"Segmentation error: {e}")
             return None
+    def predict(self, 
+                points: List[Tuple[int, int]],
+                labels: List[int],
+                image_frame: np.ndarray) -> Optional[List[Dict]]:
+        """Run the SAM model with the given points and labels."""
+        for point, label in zip(points, labels):
+            self._add_point(point[0], point[1], label)
+        
+        return self._run_segmentation(image_frame)
 
-    def reset(self):
-        """Reset all points."""
-        self.points = []
-        self.labels = []
-        self.result_image = None
-        print("Reset all points")
+    # def reset(self):
+    #     """Reset all points."""
+    #     self.points = []
+    #     self.labels = []
+    #     self.result_image = None
+    #     print("Reset all points")
 
-    def save_result(self, output_path: str):
-        """WIP: Save the current segmentation result."""
+    # def save_result(self, output_path: str):
+    #     """WIP: Save the current segmentation result."""
 
-        # TODO-100: save the mask and contours to a file
-        if self.result_image is not None:
-            cv2.imwrite(output_path, self.result_image)
-            print(f"Saved segmentation to {output_path}")
-        else:
-            print("No segmentation to save")
+    #     # TODO-100: save the mask and contours to a file
+    #     if self.result_image is not None:
+    #         cv2.imwrite(output_path, self.result_image)
+    #         print(f"Saved segmentation to {output_path}")
+    #     else:
+    #         print("No segmentation to save")
 
     def save_yolo_labels(self, image_path: str, image_frame: np.ndarray, video_frame_number: int, sam_results, label: int):
         """Save segmentation results in YOLOv11 format."""
@@ -112,7 +121,7 @@ class SAMModel:
 
 
 
-
+    
 #example usage
 def main():
     image_path = Path(__file__).parent.parent.parent / "inputs" / "image.jpg"  # Path to your image file
