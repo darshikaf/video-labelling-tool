@@ -5,6 +5,7 @@ import numpy as np
 import cv2
 from PIL import Image
 import tempfile
+import streamlit_image_coordinates 
 
 # Add the parent directory to the path so we can import our modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -16,12 +17,58 @@ from frontend.components.timeline import Timeline
 from frontend.components.tools import AnnotationTools
 from frontend.components.export import ExportInterface
 
-# Import backend components (for MVP, we'll keep these simple)
+# Import backend components
 from backend.core.sam_model import SAMModel
 from backend.core.video_processor import VideoProcessor
 
 # Set page configuration
 st.set_page_config(layout="wide", page_title="SAM Video Segmentation Tool")
+
+# Define fixed canvas dimensions for consistency
+CANVAS_WIDTH = 640
+CANVAS_HEIGHT = 480
+
+def resize_frame(frame, target_width=CANVAS_WIDTH, target_height=CANVAS_HEIGHT):
+    """
+    Resize frame to target dimensions while maintaining aspect ratio
+    
+    Args:
+        frame (numpy.ndarray): Input frame
+        target_width (int): Target width
+        target_height (int): Target height
+        
+    Returns:
+        numpy.ndarray: Resized frame
+    """
+    if frame is None:
+        return None
+        
+    h, w = frame.shape[:2]
+    
+    # Calculate target dimensions while maintaining aspect ratio
+    if w/h > target_width/target_height:
+        # Width is the limiting factor
+        new_w = target_width
+        new_h = int(h * (target_width / w))
+    else:
+        # Height is the limiting factor
+        new_h = target_height
+        new_w = int(w * (target_height / h))
+    
+    # Resize the image
+    resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    
+    # Create a canvas of target size
+    canvas = np.zeros((target_height, target_width, 3), dtype=np.uint8)
+    
+    # Calculate position to paste (center the image)
+    y_offset = (target_height - new_h) // 2
+    x_offset = (target_width - new_w) // 2
+    
+    # Paste the resized image
+    canvas[y_offset:y_offset+new_h, x_offset:x_offset+new_w] = resized
+    
+    return canvas
 
 def main():
     # Initialize session state for storing click coordinates and masks
@@ -33,7 +80,12 @@ def main():
         st.session_state.current_mask = None
     if 'annotations' not in st.session_state:
         st.session_state.annotations = {"categories": [], "frames": {}}
-        
+    if 'selected_class' not in st.session_state:
+        st.session_state.selected_class = "Person"  # TODO: Update default value
+    
+    # Initialize frame_idx with default value to avoid UnboundLocalError
+    frame_idx = 0
+    
     st.title("Video Segmentation Tool with Segment Anything")
     
     # Sidebar for tools and settings
@@ -52,11 +104,11 @@ def main():
     
     # Main area - split into columns
     col1, col2 = st.columns([3, 2])
-    
-    # Object Classes section (need to define this before video canvas to access selected_class)
+
+    # Object Classes section
     with col2:
         st.header("Object Classes")
-        classes = ["Person", "Vehicle", "Animal", "Furniture"]
+        classes = ["Person", "Vehicle", "Animal", "Furniture"] # TODO: update classes
         
         # Add class management
         new_class = st.text_input("Add New Class")
@@ -65,7 +117,8 @@ def main():
             if new_class not in st.session_state.annotations["categories"]:
                 st.session_state.annotations["categories"].append(new_class)
                 
-        selected_class = st.selectbox("Select Class", classes)
+        # Store selected class in session state with key parameter
+        selected_class = st.selectbox("Select Class", classes, key="selected_class")
         if selected_class not in st.session_state.annotations["categories"]:
             st.session_state.annotations["categories"].append(selected_class)
     
@@ -85,23 +138,30 @@ def main():
             
             # Simple frame selection for MVP
             frame_idx = st.slider("Frame", 0, video_processor.total_frames - 1, 0)
-            current_frame = video_processor.get_frame(frame_idx)
             
-            # Create a placeholder for the image
-            image_placeholder = st.empty()
+            # Get and resize frame
+            original_frame = video_processor.get_frame(frame_idx)
+            if original_frame is None:
+                st.error("Could not read frame from video")
+                return
+                
+            # Resize frame to match canvas dimensions
+            current_frame = resize_frame(original_frame, CANVAS_WIDTH, CANVAS_HEIGHT)
             
-            # Display the current frame
-            image_placeholder.image(current_frame, caption=f"Frame {frame_idx} - Click on an object")
+            # Display instructions
+            st.write("👆 **Click on the image to place a point prompt**")
             
-            # Annotation controls - simplified structure without nested columns
-            st.subheader("Annotation Controls")
-            st.markdown("👆 Click on the image to place a point prompt")
+            # Display the image with click detection
+            coordinates = streamlit_image_coordinates.streamlit_image_coordinates(
+                current_frame,
+                key=f"frame_image_{frame_idx}"
+            )
             
-            # Use simple sliders without nested columns
-            click_x = st.slider("X Position", 0, video_processor.width-1, video_processor.width//2)
-            click_y = st.slider("Y Position", 0, video_processor.height-1, video_processor.height//2)
-            
-            if st.button("Place Point"):
+            # Process click if coordinates are received
+            if coordinates:
+                click_x = coordinates['x']
+                click_y = coordinates['y']
+                
                 st.session_state.click_x = click_x
                 st.session_state.click_y = click_y
                 
@@ -127,7 +187,7 @@ def main():
                 result = cv2.addWeighted(result, alpha, colored_mask, 1-alpha, 0)
                 
                 # Display the result
-                image_placeholder.image(result, caption=f"Frame {frame_idx} with Segmentation")
+                st.image(result, caption=f"Frame {frame_idx} with Segmentation")
                 
                 # Store annotation in session state
                 if str(frame_idx) not in st.session_state.annotations["frames"]:
@@ -135,28 +195,26 @@ def main():
                 
                 # Add the annotation
                 st.session_state.annotations["frames"][str(frame_idx)].append({
-                    "category": selected_class,
+                    "category": st.session_state.selected_class,  # Use session state here
                     "mask": mask,
                     "points": [(click_x, click_y, True)]
                 })
-            
-            # Prompt info section
-            st.subheader("Prompt Info")
-            if st.session_state.click_x is not None:
-                st.write(f"Last click: ({st.session_state.click_x}, {st.session_state.click_y})")
-            
-            if st.session_state.current_mask is not None:
-                mask_area = np.sum(st.session_state.current_mask)
-                st.write(f"Mask area: {mask_area} pixels")
                 
-            if st.button("Clear"):
-                st.session_state.click_x = None
-                st.session_state.click_y = None
+                # Show point info below the image
+                st.write(f"Point added: ({click_x}, {click_y})")
+                
+                if mask is not None:
+                    mask_area = np.sum(mask)
+                    st.write(f"Mask area: {mask_area} pixels")
+            
+            # Add a clear button
+            if st.button("Clear Annotations"):
+                if str(frame_idx) in st.session_state.annotations["frames"]:
+                    st.session_state.annotations["frames"][str(frame_idx)] = []
                 st.session_state.current_mask = None
-                image_placeholder.image(current_frame, caption=f"Frame {frame_idx}")
-    
-    # Continue with the Annotations section in col2
-    with col2:
+                st.experimental_rerun()
+            
+        # Continue with the Annotations section
         st.header("Annotations")
         if st.session_state.annotations["frames"]:
             st.write(f"Frames annotated: {len(st.session_state.annotations['frames'])}")
@@ -170,33 +228,6 @@ def main():
                     st.write(f"  {i+1}. {anno['category']}")
         else:
             st.write("No annotations yet. Click on objects in the video to annotate them.")
-        
-        # Export interface
-        export_interface = ExportInterface()
-        export_config = export_interface.render_export_ui()
-        
-        if st.button("Export Annotations"):
-            if uploaded_file is not None and st.session_state.annotations["frames"]:
-                # Collect frame information
-                frames = {}
-                for frame_str in st.session_state.annotations["frames"]:
-                    frames[frame_str] = {
-                        "width": video_processor.width,
-                        "height": video_processor.height
-                    }
-                    
-                # Export
-                export_path = export_interface.export_annotations(
-                    uploaded_file.name,
-                    frames,
-                    st.session_state.annotations,
-                    export_format=export_config["format"],
-                    export_dir=export_config["directory"]
-                )
-                
-                st.success(f"Annotations exported successfully to {export_path}")
-            else:
-                st.error("Please upload a video and create annotations first")
 
 if __name__ == "__main__":
     main()
