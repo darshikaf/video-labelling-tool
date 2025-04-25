@@ -64,7 +64,7 @@ class SAMModel:
         """Save segmentation results in YOLOv11 format."""
         image_name = os.path.basename(image_path).split('.')[0]
         label_path = os.path.join(os.path.dirname(image_path), image_name + str(video_frame_number) + ".txt")
-        
+        frame_path = os.path.join(os.path.dirname(image_path), image_name + str(video_frame_number) + ".jpg")
         # for debugging: show the segmented image with contours
         # display_image = image_frame.copy()
 
@@ -99,7 +99,7 @@ class SAMModel:
                 #     pass
                 if len(normalized_points) > 2:
                     label_file.write(f"{label} " + " ".join(normalized_points) + "\n")
-        
+                    cv2.imwrite(frame_path, cv2.cvtColor(image_frame, cv2.COLOR_RGB2BGR))
         print(f"Labels saved in YOLO format at {label_path}")
     
 #example usage
