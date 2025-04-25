@@ -98,9 +98,9 @@ class SAMModel:
                         normalized_points.append(f"{norm_x} {norm_y}")
 
                 
-                print(f"normalized countours: {normalized_points}")
+                print(f"normalized countours size: {len(normalized_points)}")
 
-                if normalized_points:
+                if len(normalized_points) > 2:
                     label_file.write(f"{label} " + " ".join(normalized_points) + "\n")
         
         print(f"Labels saved in YOLO format at {label_path}")
