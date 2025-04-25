@@ -19,29 +19,35 @@ class SAMModel:
             image: Input image
             prompt_type: Type of prompt (point, box, mask)
             points: List of point prompts [(x, y, is_positive), ...]
-            boxes: List of box prompts
+            boxes: List of box prompts [(x1, y1, x2, y2), ...]
             masks: List of mask prompts
             
         Returns:
             numpy.ndarray: Binary mask
         """
-        # For the MVP, create a circular mask around clicked point
         h, w = image.shape[:2]
         mask = np.zeros((h, w), dtype=np.uint8)
         
-        if prompt_type == "point" and points and len(points) > 0:
-            # Use clicked points as centroids for masks
+        if prompt_type == "point" and points:
+            # Create a circular mask centered on each point
             for x, y, is_positive in points:
                 if is_positive:
-                    # Create a circular mask centered at the clicked point
-                    radius = np.random.randint(min(h, w) // 8, min(h, w) // 4)
+                    # Calculate a radius based on image size
+                    radius = min(h, w) // 8
                     cv2.circle(mask, (int(x), int(y)), radius, 1, -1)
+        
+        elif prompt_type == "box" and boxes:
+            # Create a mask inside each box
+            for x1, y1, x2, y2 in boxes:
+                cv2.rectangle(mask, (int(x1), int(y1)), (int(x2), int(y2)), 1, -1)
+        
         elif prompt_type == "center-point":
-            # Original behavior - create mask at center
+            # Legacy support for center point
             center_x, center_y = w // 2, h // 2
             cv2.circle(mask, (center_x, center_y), min(h, w) // 4, 1, -1)
+        
         else:
-            # Random blob placeholder behavior
+            # Random blob as placeholder
             for _ in range(3):
                 cx = np.random.randint(w//4, 3*w//4)
                 cy = np.random.randint(h//4, 3*h//4)
