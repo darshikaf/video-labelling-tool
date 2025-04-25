@@ -136,9 +136,63 @@ def main():
             video_processor = VideoProcessor(video_path)
             sam_model = SAMModel()
             
+            # Get current frame index from session state or initialize
+            if 'frame_idx' not in st.session_state:
+                st.session_state.frame_idx = 0
+
             # Simple frame selection for MVP
-            frame_idx = st.slider("Frame", 0, video_processor.total_frames - 1, 0)
+            # frame_idx = st.slider("Frame", 0, video_processor.total_frames - 1, 0)
             
+            # Frame navigation controls - multiple options for better UX
+            st.write("### Frame Navigation")
+
+            # 1. Navigation buttons in a row
+            col_nav1, col_nav2, col_nav3, col_nav4, col_nav5 = st.columns([1, 1, 2, 1, 1])
+            
+            with col_nav1:
+                if st.button("⏪ -10"):
+                    st.session_state.frame_idx = max(0, st.session_state.frame_idx - 10)
+            
+            with col_nav2:
+                if st.button("◀️ Prev"):
+                    st.session_state.frame_idx = max(0, st.session_state.frame_idx - 1)
+            
+            with col_nav3:
+                # 2. Direct frame input
+                current_frame_number = st.number_input(
+                    "Frame #", 
+                    min_value=0, 
+                    max_value=video_processor.total_frames - 1,
+                    value=st.session_state.frame_idx,
+                    step=1
+                )
+                if current_frame_number != st.session_state.frame_idx:
+                    st.session_state.frame_idx = current_frame_number
+            
+            with col_nav4:
+                if st.button("Next ▶️"):
+                    st.session_state.frame_idx = min(video_processor.total_frames - 1, st.session_state.frame_idx + 1)
+            
+            with col_nav5:
+                if st.button("⏩ +10"):
+                    st.session_state.frame_idx = min(video_processor.total_frames - 1, st.session_state.frame_idx + 10)
+            
+            # 3. Keep the slider for large jumps
+            frame_idx = st.slider(
+                "Scrub Timeline", 
+                0, 
+                video_processor.total_frames - 1, 
+                st.session_state.frame_idx
+            )
+            
+            # Update session state if slider was moved
+            if frame_idx != st.session_state.frame_idx:
+                st.session_state.frame_idx = frame_idx
+            else:
+                # Use the value from session state (which might have been updated by buttons)
+                frame_idx = st.session_state.frame_idx
+            
+
             # Get and resize frame
             original_frame = video_processor.get_frame(frame_idx)
             if original_frame is None:
