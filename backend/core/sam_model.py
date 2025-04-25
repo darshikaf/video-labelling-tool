@@ -23,6 +23,7 @@ class SAMModel:
         self.points = []  # (x, y) coordinates
         self.labels = []  # 1 for foreground, 0 for background (we jest need foreground for now)
         self.result_image = None
+        self.contours = None
         
     def _add_point(self, x: int, y: int, label: int=1):
         """Add a new point with its label."""
@@ -45,11 +46,18 @@ class SAMModel:
                 labels=self.labels, 
                 show=False
             )
+
+            for i, mask in enumerate(results[0].masks.data):
+                    mask_np = mask.cpu().numpy().astype("uint8") * 255
+                    contours, _ = cv2.findContours(mask_np, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            self.contours = contours
             return results
 
         except Exception as e:
             print(f"Segmentation error: {e}")
             return None
+        
     def predict(self, 
                 points: List[Tuple[int, int]],
                 labels: List[int],
@@ -102,4 +110,37 @@ class SAMModel:
                     cv2.imwrite(frame_path, cv2.cvtColor(image_frame, cv2.COLOR_RGB2BGR))
         print(f"Labels saved in YOLO format at {label_path}")
     
+    def get_contours(self):
+        """Get the contours of the segmented image."""
+        return self.contours
+
 #example usage
+if __name__ == "__main__":
+    sam_model = SAMModel()
+    # Load an image
+    image_path = Path(__file__).parent.parent.parent / "input" / "temp_vid_image422.jpg"
+    image_frame = cv2.imread(str(image_path))
+    
+    # Example points and labels
+    points = [(100, 150)]
+    labels = [1]  # 1 for foreground
+    
+    # Run segmentation
+    results = sam_model.predict(points, labels, image_frame)
+    
+    # Save results
+    sam_model.save_yolo_labels(image_path=str(image_path), 
+                               image_frame=image_frame, 
+                               video_frame_number=0, 
+                               sam_results=results,
+                               label=1)
+    # Get contours
+    contours = sam_model.get_contours()
+    print(f"Contours: {contours}")
+
+    # Display the image with contours
+    for contour in contours:
+        cv2.drawContours(image_frame, [contour], -1, (0, 255, 0), 2)
+    cv2.imshow("Segmented Image", image_frame)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows() 
