@@ -7,6 +7,7 @@ from PIL import Image
 import tempfile
 import streamlit_image_coordinates 
 
+from pathlib import Path
 # Add the parent directory to the path so we can import our modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -169,7 +170,7 @@ def main():
                 sam_model.add_point(click_x, click_y, label=1)  # 1 for foreground
                 results = sam_model.run_segmentation(current_frame)
 
-                print(f"Results for frame {frame_idx}: {results}")
+                # print(f"Results for frame {frame_idx}: {results}")
 
                 # mask = sam_model.predict(
                 #     current_frame, 
@@ -178,7 +179,6 @@ def main():
                 # )
                 
                 mask  = results[0].masks.data
-                # mask = results['masks'][0] if results else None
 
                 st.session_state.current_mask = mask
                 
@@ -214,7 +214,14 @@ def main():
                 # if mask is not None:
                 #     mask_area = np.sum(mask)
                 #     st.write(f"Mask area: {mask_area} pixels")
-            
+            if st.button("save results"):
+                temp_path_name = Path(__file__).parent.parent / "input" / "temp_vid_image.jpg" 
+                sam_model.save_yolo_labels(image_path=temp_path_name,
+                                           image_frame=current_frame,
+                                           video_frame_number=frame_idx,
+                                           sam_results=results,
+                                           label=1)
+                st.success("Results saved successfully!")
             # Add a clear button
             if st.button("Clear Annotations"):
                 pass
