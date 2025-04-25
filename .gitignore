@@ -9,3 +9,4 @@ miniconda.sh
 test/
 results/
 models/
+input/
