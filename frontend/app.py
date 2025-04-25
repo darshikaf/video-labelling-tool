@@ -167,11 +167,6 @@ def main():
                 st.session_state.click_y = click_y
                 
                 # Generate mask from the clicked point
-                # sam_model.add_point(click_x, click_y, label=1)  # 1 for foreground
-                # results = sam_model.run_segmentation(current_frame)
-
-                # print(f"Results for frame {frame_idx}: {results}")
-
                 results = sam_model.predict(
                     points=[(click_x, click_y)],
                     labels=[1],  # 1 for foreground
