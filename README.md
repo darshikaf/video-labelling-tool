@@ -49,3 +49,8 @@ This is a minimum viable product (MVP) implementation of the video segmentation 
   - Download the SAM model weights
   - Implement proper interactive annotation callbacks
   - Add temporal tracking between frames
+
+
+## Reference
+
+1. [YOLOv8-Instance Segmentation Datasets Overview](https://docs.ultralytics.com/datasets/segment/)
