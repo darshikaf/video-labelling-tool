@@ -1,15 +1,21 @@
+"""
+WIP
+"""
+
+
 import cv2
 import os
 import numpy as np
 from ultralytics import SAM
 from typing import Tuple, List, Optional, Dict
+from pathlib import Path
 
 class SAMModel:    
     def __init__(self):
         """Initialize the application with the model path."""
         # Load the SAM model
         # TODO-1000:loaded from a config file ?
-        model_path = "../models/sam2.1_b.pt"
+        model_path = Path(__file__).parent.parent.parent / "models" / "sam2.1_b.pt"
         self.model = SAM(model_path)
         print("Model loaded successfully!")
         
@@ -62,10 +68,42 @@ class SAMModel:
         else:
             print("No segmentation to save")
 
-    def save_yolo_labels(self, image_path: str):
-        """WIP: Save the segmentation result in YOLO format."""
-        # TODO-10: Implement saving in YOLO format
-        pass
+    def save_yolo_labels(self, image_path: str, image_frame: np.ndarray, video_frame_number: int, sam_results, label: int):
+        """Save segmentation results in YOLOv11 format."""
+        image_name = os.path.basename(image_path).split('.')[0]
+        label_path = os.path.join(os.path.dirname(image_path), image_name + str(video_frame_number) + ".txt")
+        
+        # Open file to write labels
+        with open(label_path, 'w') as label_file:
+            height, width, _ = image_frame.shape
+            if sam_results and hasattr(sam_results[0], 'masks') and sam_results[0].masks is not None:
+                # mask_composite = np.zeros_like(display_image)
+                
+                for i, mask in enumerate(sam_results[0].masks.data):
+                    mask_np = mask.cpu().numpy().astype("uint8") * 255
+                    # Color the mask with a semi-transparent overlay
+                    # mask_composite[mask_np > 0] = [0, 255, 0]  # Green mask
+
+                    # Draw contours
+                    contours, _ = cv2.findContours(mask_np, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    # cv2.drawContours(display_image, contours, -1, (0, 255, 0), 2)
+
+                # Normalize points to be between 0 and 1
+                normalized_points = []
+                for contour in contours:
+                    for point in contour:
+                        # Normalize each point
+                        norm_x = point[0][0] / width
+                        norm_y = point[0][1] / height
+                        normalized_points.append(f"{norm_x} {norm_y}")
+
+                
+                print(f"normalized countours: {normalized_points}")
+
+                if normalized_points:
+                    label_file.write(f"{label} " + " ".join(normalized_points) + "\n")
+        
+        print(f"Labels saved in YOLO format at {label_path}")
 
 
 
@@ -74,13 +112,15 @@ class SAMModel:
 def main():
     # Configuration
     # model_path = "../models/sam2.1_b.pt"
-    image_path = "../inputs/image.jpg"  # Path to your image file
+    image_path = Path(__file__).parent.parent.parent / "inputs" / "image.jpg"  # Path to your image file
+    # image_path = Path(__file__).parent.parent / "inputs" / "image.jpg"
 
     # Create SAMModel instance
     app = SAMModel()
 
     # Load the image
-    image = cv2.imread(image_path)
+    image = cv2.imread(str(image_path))
+    # image = cv2.imread(image_path)
     if image is None:
         print(f"Error: Could not load image at {image_path}.")
         return
@@ -112,7 +152,8 @@ def main():
             # Draw contours
             contours, _ = cv2.findContours(mask_np, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             cv2.drawContours(display_image, contours, -1, (0, 255, 0), 2)
-        
+
+            print(f"countours: {contours}")
         # Apply mask overlay with transparency
         alpha = 0.4  # Transparency factor
         cv2.addWeighted(mask_composite, alpha, display_image, 1 - alpha, 0, display_image)
@@ -137,8 +178,16 @@ def main():
     elif key == ord('r'):  # Reset points
         app.reset()
     elif key == ord('s'):  # Save result
-        output_path = "../output/segmented_image.png"  # Customize the path as needed
-        app.save_result(output_path)
+        # output_path = "../output/segmented_image.png"  # Customize the path as needed
+        output_path = Path(__file__).parent.parent.parent / "outputs" / "seg_image.jpg"
+        output_path = str(output_path)
+        # app.save_result(output_path)
+        app.save_yolo_labels(
+            image_path=str(image_path),
+            image_frame=image, 
+            video_frame_number=453, 
+            sam_results=results, 
+            label=1)  # Save YOLO labels
     
     cv2.destroyAllWindows()
 
