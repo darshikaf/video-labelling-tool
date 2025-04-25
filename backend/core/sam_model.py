@@ -24,7 +24,7 @@ class SAMModel:
         self.labels = []  # 1 for foreground, 0 for background (we jest need foreground for now)
         self.result_image = None
         
-    def add_point(self, x: int, y: int, label: int):
+    def add_point(self, x: int, y: int, label: int=1):
         """Add a new point with its label."""
         self.points.append((x, y))
         self.labels.append(label)
@@ -73,6 +73,9 @@ class SAMModel:
         image_name = os.path.basename(image_path).split('.')[0]
         label_path = os.path.join(os.path.dirname(image_path), image_name + str(video_frame_number) + ".txt")
         
+        # for debugging: show the segmented image with contours
+        # display_image = image_frame.copy()
+
         # Open file to write labels
         with open(label_path, 'w') as label_file:
             height, width, _ = image_frame.shape
@@ -81,11 +84,9 @@ class SAMModel:
                 
                 for i, mask in enumerate(sam_results[0].masks.data):
                     mask_np = mask.cpu().numpy().astype("uint8") * 255
-                    # Color the mask with a semi-transparent overlay
-                    # mask_composite[mask_np > 0] = [0, 255, 0]  # Green mask
-
-                    # Draw contours
                     contours, _ = cv2.findContours(mask_np, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    
+                    # for debugging: show the segmented image with contours
                     # cv2.drawContours(display_image, contours, -1, (0, 255, 0), 2)
 
                 # Normalize points to be between 0 and 1
@@ -97,9 +98,13 @@ class SAMModel:
                         norm_y = point[0][1] / height
                         normalized_points.append(f"{norm_x} {norm_y}")
 
-                
-                print(f"normalized countours size: {len(normalized_points)}")
+                # For debugging: show the segmented image with contours
+                # cv2.imshow("Segmented saved Image", display_image)
+                # print(f"normalized countours size: {len(normalized_points)}")
 
+                # key = cv2.waitKey(0) & 0xFF
+                # if key == ord('q'):  # Quit
+                #     pass
                 if len(normalized_points) > 2:
                     label_file.write(f"{label} " + " ".join(normalized_points) + "\n")
         
@@ -110,26 +115,20 @@ class SAMModel:
 
 #example usage
 def main():
-    # Configuration
-    # model_path = "../models/sam2.1_b.pt"
     image_path = Path(__file__).parent.parent.parent / "inputs" / "image.jpg"  # Path to your image file
-    # image_path = Path(__file__).parent.parent / "inputs" / "image.jpg"
-
+   
     # Create SAMModel instance
     app = SAMModel()
 
     # Load the image
     image = cv2.imread(str(image_path))
-    # image = cv2.imread(image_path)
     if image is None:
         print(f"Error: Could not load image at {image_path}.")
         return
-
-    # Example of adding points: add some points manually (for testing purposes)
+    
     # In a real case, you would probably capture points from user input
     if len(app.points) == 0:  # Add initial points if not added
         app.add_point(100, 100, 1)  # Foreground point
-        # app.add_point(200, 200, 0)  # Background point 
     
     # Process the image with segmentation model
     results = app.run_segmentation(image)
