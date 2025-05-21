@@ -3,3 +3,4 @@ opencv-python==4.8.0.74
 numpy==1.24.3
 Pillow==9.5.0
 streamlit-image-coordinates==0.2.1
+ultralytics==8.2.0

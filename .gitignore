@@ -166,3 +166,6 @@ artifacts/
 
 .DS_Store
 .vscode
+
+# model checkpoint
+*.pt
