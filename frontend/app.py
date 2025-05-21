@@ -5,7 +5,7 @@ import numpy as np
 import cv2
 from PIL import Image
 import tempfile
-import streamlit_image_coordinates 
+import streamlit_image_coordinates
 
 # Add the parent directory to the path so we can import our modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -81,7 +81,13 @@ def main():
     if 'annotations' not in st.session_state:
         st.session_state.annotations = {"categories": [], "frames": {}}
     if 'selected_class' not in st.session_state:
-        st.session_state.selected_class = "Person"  # TODO: Update default value
+        st.session_state.selected_class = "Person"  # Default class
+    if 'prompt_type' not in st.session_state:
+        st.session_state.prompt_type = "point"  # Default prompt type
+    if 'points' not in st.session_state:
+        st.session_state.points = []  # List of points [(x, y, is_positive), ...]
+    if 'boxes' not in st.session_state:
+        st.session_state.boxes = []  # List of boxes [(x1, y1, x2, y2), ...]
     
     # Initialize frame_idx with default value to avoid UnboundLocalError
     frame_idx = 0
@@ -96,15 +102,47 @@ def main():
             ("Point Prompt", "Box Prompt", "Clear Prompts")
         )
         
+        # Update prompt type based on tool selection
+        if tool_type == "Point Prompt":
+            st.session_state.prompt_type = "point"
+            point_type = st.radio("Point Type", ("Foreground", "Background"))
+        elif tool_type == "Box Prompt":
+            st.session_state.prompt_type = "box"
+        elif tool_type == "Clear Prompts":
+            st.session_state.points = []
+            st.session_state.boxes = []
+            st.session_state.current_mask = None
+        
         st.header("Settings")
         confidence_threshold = st.slider("Confidence Threshold", 0.0, 1.0, 0.7)
+        
+        # Export options
+        st.header("Export")
+        export_format = st.selectbox(
+            "Export Format",
+            ["COCO", "YOLO", "CSV", "JSON"]
+        )
+        
+        if export_format == "YOLO":
+            yolo_label = st.number_input("YOLO Class ID", 0, 100, 0)
+        
+        if st.button("Export Annotations"):
+            if 'video_path' in locals() and st.session_state.annotations["frames"]:
+                export_interface = ExportInterface()
+                export_path = export_interface.export_annotations(
+                    os.path.basename(video_path),
+                    {frame_idx: {"width": CANVAS_WIDTH, "height": CANVAS_HEIGHT} for frame_idx in st.session_state.annotations["frames"]},
+                    st.session_state.annotations,
+                    export_format,
+                    "exports"
+                )
+                st.success(f"Annotations exported to {export_path}")
         
         st.header("Upload")
         uploaded_file = st.file_uploader("Choose a video file", type=["mp4", "avi", "mov"])
     
     # Main area - split into columns
     col1, col2 = st.columns([3, 2])
-
     # Object Classes section
     with col2:
         st.header("Object Classes")
@@ -139,11 +177,8 @@ def main():
             # Get current frame index from session state or initialize
             if 'frame_idx' not in st.session_state:
                 st.session_state.frame_idx = 0
-
-            # Simple frame selection for MVP
-            # frame_idx = st.slider("Frame", 0, video_processor.total_frames - 1, 0)
             
-            # Frame navigation controls - multiple options for better UX
+            # Frame navigation controls
             st.write("### Frame Navigation")
 
             # 1. Navigation buttons in a row
@@ -202,8 +237,11 @@ def main():
             # Resize frame to match canvas dimensions
             current_frame = resize_frame(original_frame, CANVAS_WIDTH, CANVAS_HEIGHT)
             
-            # Display instructions
-            st.write("👆 **Click on the image to place a point prompt**")
+            # Display instructions based on selected tool
+            if st.session_state.prompt_type == "point":
+                st.write("👆 **Click on the image to place a point prompt**")
+            elif st.session_state.prompt_type == "box":
+                st.write("👆 **Click and drag on the image to create a box prompt**")
             
             # Display the image with click detection
             coordinates = streamlit_image_coordinates.streamlit_image_coordinates(
@@ -219,56 +257,98 @@ def main():
                 st.session_state.click_x = click_x
                 st.session_state.click_y = click_y
                 
-                # Generate mask from the clicked point
-                mask = sam_model.predict(
-                    current_frame, 
-                    prompt_type="point", 
-                    points=[(click_x, click_y, True)]
-                )
+                # Add point to session state
+                if st.session_state.prompt_type == "point":
+                    is_positive = point_type == "Foreground" if 'point_type' in locals() else True
+                    st.session_state.points.append((click_x, click_y, is_positive))
+                
+                # Generate mask from the prompts
+                if st.session_state.prompt_type == "point":
+                    mask = sam_model.predict(
+                        current_frame, 
+                        prompt_type="point", 
+                        points=st.session_state.points
+                    )
+                elif st.session_state.prompt_type == "box" and len(st.session_state.boxes) > 0:
+                    mask = sam_model.predict(
+                        current_frame, 
+                        prompt_type="box", 
+                        boxes=st.session_state.boxes
+                    )
+                else:
+                    mask = None
                 
                 st.session_state.current_mask = mask
                 
-                # Create visualization
-                colored_mask = np.zeros_like(current_frame)
-                colored_mask[:,:,1] = mask * 255  # Green channel
-                
-                # Draw point on the image
-                result = current_frame.copy()
-                cv2.circle(result, (click_x, click_y), 5, (255, 0, 0), -1)
-                
-                # Blend original image with mask
-                alpha = 0.7
-                result = cv2.addWeighted(result, alpha, colored_mask, 1-alpha, 0)
-                
-                # Display the result
-                st.image(result, caption=f"Frame {frame_idx} with Segmentation")
-                
-                # Store annotation in session state
-                if str(frame_idx) not in st.session_state.annotations["frames"]:
-                    st.session_state.annotations["frames"][str(frame_idx)] = []
-                
-                # Add the annotation
-                st.session_state.annotations["frames"][str(frame_idx)].append({
-                    "category": st.session_state.selected_class,  # Use session state here
-                    "mask": mask,
-                    "points": [(click_x, click_y, True)]
-                })
-                
-                # Show point info below the image
-                st.write(f"Point added: ({click_x}, {click_y})")
-                
                 if mask is not None:
-                    mask_area = np.sum(mask)
-                    st.write(f"Mask area: {mask_area} pixels")
-            
+                    # Create visualization
+                    colored_mask = np.zeros_like(current_frame)
+                    colored_mask[:,:,1] = mask * 255  # Green channel
+                    
+                    # Draw points on the image
+                    result = current_frame.copy()
+                    for pt_x, pt_y, is_pos in st.session_state.points:
+                        color = (0, 255, 0) if is_pos else (0, 0, 255)
+                        cv2.circle(result, (pt_x, pt_y), 5, color, -1)
+                    
+                    # Draw boxes if any
+                    for box in st.session_state.boxes:
+                        x1, y1, x2, y2 = box
+                        cv2.rectangle(result, (x1, y1), (x2, y2), (255, 0, 0), 2)
+                    
+                    # Blend original image with mask
+                    alpha = 0.7
+                    result = cv2.addWeighted(result, alpha, colored_mask, 1-alpha, 0)
+                    
+                    # Display the result
+                    st.image(result, caption=f"Frame {frame_idx} with Segmentation")
+                    
+                    # Add Save button for this segmentation
+                    if st.button("Save Annotation"):
+                        # Store annotation in session state
+                        if str(frame_idx) not in st.session_state.annotations["frames"]:
+                            st.session_state.annotations["frames"][str(frame_idx)] = []
+                        
+                        # Add the annotation
+                        st.session_state.annotations["frames"][str(frame_idx)].append({
+                            "category": st.session_state.selected_class,
+                            "mask": mask,
+                            "points": st.session_state.points.copy() if st.session_state.prompt_type == "point" else [],
+                            "boxes": st.session_state.boxes.copy() if st.session_state.prompt_type == "box" else []
+                        })
+                        
+                        # Get contours from SAM model
+                        contours = sam_model.get_contours()
+                        
+                        # Optional: Export in YOLO format if requested
+                        if export_format == "YOLO" and 'yolo_label' in locals():
+                            # Create temporary path for the frame image
+                            temp_img_path = os.path.join(tempfile.gettempdir(), f"frame_{frame_idx}.jpg")
+                            cv2.imwrite(temp_img_path, cv2.cvtColor(original_frame, cv2.COLOR_RGB2BGR))
+                            
+                            # Use the model's built-in YOLO export
+                            sam_results = [type('obj', (), {'masks': type('masks', (), {'data': [mask]})()})]
+                            sam_model.save_yolo_labels(
+                                temp_img_path, 
+                                original_frame, 
+                                frame_idx, 
+                                sam_results, 
+                                yolo_label
+                            )
+                        
+                        # Clear points and boxes after saving
+                        st.session_state.points = []
+                        st.session_state.boxes = []
+                        st.experimental_rerun()
+                
             # Add a clear button
-            if st.button("Clear Annotations"):
-                if str(frame_idx) in st.session_state.annotations["frames"]:
-                    st.session_state.annotations["frames"][str(frame_idx)] = []
+            if st.button("Clear Prompts"):
+                st.session_state.points = []
+                st.session_state.boxes = []
                 st.session_state.current_mask = None
                 st.experimental_rerun()
             
-        # Continue with the Annotations section
+        # Annotations section
         st.header("Annotations")
         if st.session_state.annotations["frames"]:
             st.write(f"Frames annotated: {len(st.session_state.annotations['frames'])}")
@@ -280,6 +360,13 @@ def main():
                 st.write(f"Annotations for frame {frame_idx}:")
                 for i, anno in enumerate(st.session_state.annotations["frames"][str(frame_idx)]):
                     st.write(f"  {i+1}. {anno['category']}")
+                    
+                    # Option to delete individual annotations
+                    if st.button(f"Delete annotation {i+1}", key=f"delete_{frame_idx}_{i}"):
+                        st.session_state.annotations["frames"][str(frame_idx)].pop(i)
+                        if not st.session_state.annotations["frames"][str(frame_idx)]:
+                            del st.session_state.annotations["frames"][str(frame_idx)]
+                        st.experimental_rerun()
         else:
             st.write("No annotations yet. Click on objects in the video to annotate them.")
 

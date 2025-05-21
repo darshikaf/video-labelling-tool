@@ -29,3 +29,27 @@ class AnnotationTools:
             "tool": self.current_tool,
             "point_mode": self.point_mode if self.current_tool == "point" else None
         }
+    
+    def process_prompt(self, tool_config, sam_model, image, points=None, boxes=None):
+        """
+        Process annotation prompt with the current tool
+        
+        Args:
+            tool_config (dict): Tool configuration
+            sam_model: SAM model instance
+            image: Input image
+            points: List of point coordinates
+            boxes: List of box coordinates
+            
+        Returns:
+            numpy.ndarray: Segmentation mask
+        """
+        if tool_config["tool"] == "point" and points:
+            is_positive = tool_config["point_mode"] == "positive"
+            point_prompts = [(x, y, is_positive) for x, y in points]
+            return sam_model.predict(image, prompt_type="point", points=point_prompts)
+            
+        elif tool_config["tool"] == "box" and boxes:
+            return sam_model.predict(image, prompt_type="box", boxes=boxes)
+            
+        return None

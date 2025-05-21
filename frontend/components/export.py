@@ -6,6 +6,7 @@ import numpy as np
 import cv2
 from PIL import Image
 import datetime
+import shutil
 
 class ExportInterface:
     """
@@ -14,7 +15,7 @@ class ExportInterface:
     def __init__(self):
         """Initialize the export interface"""
         self.supported_formats = ["COCO", "YOLO", "CSV", "JSON"]
-        
+    
     def export_annotations(self, video_name, frames, annotations, export_format="COCO", export_dir="exports"):
         """
         Export annotations in the specified format
@@ -144,18 +145,41 @@ class ExportInterface:
             
             if frame_annotations:
                 # Create label file
-                label_file = os.path.join(yolo_dir, "labels", f"frame_{frame_idx:06d}.txt")
+                label_file = os.path.join(yolo_dir, "labels", f"frame_{int(frame_idx):06d}.txt")
                 
                 with open(label_file, 'w') as f:
                     for anno in frame_annotations:
                         # Get class index
                         class_idx = annotations.get("categories", []).index(anno.get("category", ""))
                         
-                        # For segmentation masks, we'd typically convert to YOLO polygon format
-                        # For MVP, we'll just use the bounding box
+                        # Handle segmentation masks - use SAM model's format
                         mask = anno.get("mask")
                         if mask is not None:
-                            # Calculate bounding box
+                            # For segmentation:
+                            contours, _ = cv2.findContours(
+                                (mask > 0).astype(np.uint8), 
+                                cv2.RETR_EXTERNAL, 
+                                cv2.CHAIN_APPROX_SIMPLE
+                            )
+                            
+                            # Format for YOLO segmentation annotation (polygon format)
+                            for contour in contours:
+                                img_w = frame_data.get("width", 1)
+                                img_h = frame_data.get("height", 1)
+                                
+                                # Normalize points
+                                points = []
+                                for pt in contour:
+                                    x, y = pt[0]
+                                    norm_x = x / img_w
+                                    norm_y = y / img_h
+                                    points.extend([norm_x, norm_y])
+                                
+                                if len(points) > 5:  # At least 3 points (6 values)
+                                    points_str = " ".join([f"{p:.6f}" for p in points])
+                                    f.write(f"{class_idx} {points_str}\n")
+                            
+                            # Calculate bounding box (for regular YOLO detection)
                             x, y, w, h = cv2.boundingRect((mask > 0).astype(np.uint8))
                             
                             # Convert to YOLO format (normalized center x, center y, width, height)
@@ -166,10 +190,7 @@ class ExportInterface:
                             center_y = (y + h/2) / img_h
                             norm_w = w / img_w
                             norm_h = h / img_h
-                            
-                            # Write to file
-                            f.write(f"{class_idx} {center_x:.6f} {center_y:.6f} {norm_w:.6f} {norm_h:.6f}\n")
-        
+                
         return yolo_dir
     
     def _export_csv(self, base_filename, frames, annotations, export_dir):
@@ -227,8 +248,7 @@ class ExportInterface:
                         # Calculate bounding box
                         x, y, w, h = cv2.boundingRect((mask > 0).astype(np.uint8))
                         
-                        # For JSON export, we'll encode mask as base64 or save
-                        # the contours for simplicity
+                        # For JSON export, encode contours
                         contours, _ = cv2.findContours(
                             (mask > 0).astype(np.uint8), 
                             cv2.RETR_EXTERNAL, 
@@ -275,8 +295,8 @@ class ExportInterface:
             export_options["include_images"] = st.checkbox("Include Frame Images", value=True)
         
         elif export_format == "YOLO":
-            export_options["export_masks"] = st.checkbox("Export Segmentation Masks", value=False)
-            st.info("Note: YOLO format typically uses bounding boxes. Mask export is experimental.")
+            export_options["export_masks"] = st.checkbox("Export Segmentation Masks", value=True)
+            st.info("YOLO format supports both bounding boxes and polygon segmentation.")
         
         # Export button and directory
         export_dir = st.text_input("Export Directory", value="exports")

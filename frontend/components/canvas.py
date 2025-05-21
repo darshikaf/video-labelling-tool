@@ -28,7 +28,7 @@ class AnnotationCanvas:
             is_positive (bool): Whether it's a positive or negative point
         """
         self.points.append((x, y, is_positive))
-        
+    
     def add_box(self, x1, y1, x2, y2):
         """
         Add a box prompt to the canvas
@@ -38,13 +38,13 @@ class AnnotationCanvas:
             x2, y2 (int): Bottom-right coordinates
         """
         self.boxes.append((x1, y1, x2, y2))
-        
+    
     def clear(self):
         """Clear all annotations"""
         self.points = []
         self.boxes = []
         self.masks = []
-        
+    
     def draw_annotations(self, image):
         """
         Draw annotations on the image
@@ -69,5 +69,35 @@ class AnnotationCanvas:
         # Draw boxes
         for x1, y1, x2, y2 in self.boxes:
             draw.rectangle((x1, y1, x2, y2), outline=(255, 255, 0), width=2)
+        
+        # Draw masks if any
+        result = np.array(pil_image)
+        for mask in self.masks:
+            # Apply mask as a colored overlay
+            colored_mask = np.zeros_like(result)
+            colored_mask[:,:,1] = mask * 255  # Green channel
             
-        return np.array(pil_image)
+            # Blend with reduced opacity
+            alpha = 0.5
+            cv2.addWeighted(result, 1, colored_mask, alpha, 0, result)
+            
+        return result
+    
+    def generate_mask(self, sam_model, image, prompt_type="point"):
+        """
+        Generate a segmentation mask using SAM model
+        
+        Args:
+            sam_model: SAM model instance
+            image: Input image
+            prompt_type: Type of prompt to use
+            
+        Returns:
+            numpy.ndarray: Binary mask
+        """
+        if prompt_type == "point" and self.points:
+            return sam_model.predict(image, prompt_type="point", points=self.points)
+        elif prompt_type == "box" and self.boxes:
+            return sam_model.predict(image, prompt_type="box", boxes=self.boxes)
+        else:
+            return None
