@@ -173,13 +173,21 @@ def main():
                     image_frame=current_frame
                 )
                 
-                mask  = results[0].masks.data
+                mask_tensor = results[0].masks.data  # This is likely a tensor of shape (1, H, W)
+                if hasattr(mask_tensor, "cpu"):
+                    mask_np = mask_tensor.cpu().numpy()
+                else:
+                    mask_np = np.array(mask_tensor)
+                # If mask_np has shape (1, H, W), squeeze it
+                if mask_np.ndim == 3 and mask_np.shape[0] == 1:
+                    mask_np = mask_np[0]
+                mask_np = (mask_np * 255).astype("uint8")
 
-                st.session_state.current_mask = mask
-                
+                st.session_state.current_mask = mask_np
+
                 # Create visualization
                 colored_mask = np.zeros_like(current_frame)
-                colored_mask[:,:,1] = mask * 255  # Green channel
+                colored_mask[:,:,1] = mask_np  # Green channel
                 
                 # Draw point on the image
                 result = current_frame.copy()
