@@ -193,7 +193,11 @@ class SAMModel:
             height, width, _ = image_frame.shape
             if sam_results and hasattr(sam_results[0], 'masks') and sam_results[0].masks is not None:
                 for mask in sam_results[0].masks.data:
-                    mask_np = mask.cpu().numpy().astype("uint8") * 255
+                    # mask_np = mask.cpu().numpy().astype("uint8") * 255
+                    if hasattr(mask, "cpu"):
+                        mask_np = mask.cpu().numpy().astype("uint8") * 255
+                    else:
+                        mask_np = mask.astype("uint8") * 255
                     contours, _ = cv2.findContours(mask_np, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                     
                     # Normalize points to be between 0 and 1
