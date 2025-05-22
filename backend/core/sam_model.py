@@ -18,7 +18,7 @@ class SAMModel:
         """
         self.model_type = model_type
         # Load the SAM model
-        model_path = Path(__file__).parent.parent.parent / "models" / "sam2_b.pt"
+        model_path = Path(__file__).parent.parent.parent / "models" / "sam2.1_b.pt"
         model_dir = model_path.parent
         
         # Create models directory if it doesn't exist
@@ -119,9 +119,12 @@ class SAMModel:
         result_mask = np.zeros((h, w), dtype=np.uint8)
         
         # Reset points and labels
-        self.points = []
-        self.labels = []
+        # self.points = []
+        # self.labels = []
         
+        for point in points:
+            self._add_point(point[0], point[1])
+
         if self.model is None:
             # Fallback to simulation mode if model isn't loaded
             if prompt_type == "point" and points:
