@@ -31,7 +31,7 @@ class SAMModel:
                 
                 # Download model from Ultralytics
                 torch.hub.download_url_to_file(
-                    "https://github.com/ultralytics/assets/releases/download/v8.2.0/sam2_b.pt",
+                    "https://github.com/ultralytics/assets/releases/download/v8.2.0/sam2.1_b.pt",
                     str(model_path)
                 )
                 print(f"Model downloaded successfully to {model_path}")
