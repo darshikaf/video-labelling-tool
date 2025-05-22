@@ -323,7 +323,15 @@ def main():
                         # Optional: Export in YOLO format if requested
                         if export_format == "YOLO" and 'yolo_label' in locals():
                             # Create temporary path for the frame image
-                            temp_img_path = os.path.join(tempfile.gettempdir(), f"frame_{frame_idx}.jpg")
+                            # temp_img_path = os.path.join(tempfile.gettempdir(), f"frame_{frame_idx}.jpg")
+                            # cv2.imwrite(temp_img_path, cv2.cvtColor(original_frame, cv2.COLOR_RGB2BGR))
+
+                            # Create 'annotation' directory at the project root if it doesn't exist
+                            annotation_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "annotation")
+                            os.makedirs(annotation_dir, exist_ok=True)
+
+                            # Save the image in the annotation directory
+                            temp_img_path = os.path.join(annotation_dir, f"frame_{frame_idx}.jpg")
                             cv2.imwrite(temp_img_path, cv2.cvtColor(original_frame, cv2.COLOR_RGB2BGR))
                             
                             # Use the model's built-in YOLO export
