@@ -169,3 +169,6 @@ artifacts/
 
 # model checkpoint
 *.pt
+
+/test
+/input
