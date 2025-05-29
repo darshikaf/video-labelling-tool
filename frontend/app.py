@@ -88,6 +88,8 @@ def main():
         st.session_state.points = []  # List of points [(x, y, is_positive), ...]
     if 'boxes' not in st.session_state:
         st.session_state.boxes = []  # List of boxes [(x1, y1, x2, y2), ...]
+    if 'awaiting_decision' not in st.session_state:
+        st.session_state.awaiting_decision = False  # Flag to show save/cancel buttons
     
     # Initialize frame_idx with default value to avoid UnboundLocalError
     frame_idx = 0
@@ -112,6 +114,7 @@ def main():
             st.session_state.points = []
             st.session_state.boxes = []
             st.session_state.current_mask = None
+            st.session_state.awaiting_decision = False
         
         st.header("Settings")
         confidence_threshold = st.slider("Confidence Threshold", 0.0, 1.0, 0.7)
@@ -187,10 +190,18 @@ def main():
             with col_nav1:
                 if st.button("⏪ -10"):
                     st.session_state.frame_idx = max(0, st.session_state.frame_idx - 10)
+                    # Reset annotation workflow state when navigating
+                    st.session_state.points = []
+                    st.session_state.current_mask = None
+                    st.session_state.awaiting_decision = False
             
             with col_nav2:
                 if st.button("◀️ Prev"):
                     st.session_state.frame_idx = max(0, st.session_state.frame_idx - 1)
+                    # Reset annotation workflow state when navigating
+                    st.session_state.points = []
+                    st.session_state.current_mask = None
+                    st.session_state.awaiting_decision = False
             
             with col_nav3:
                 # 2. Direct frame input
@@ -203,14 +214,26 @@ def main():
                 )
                 if current_frame_number != st.session_state.frame_idx:
                     st.session_state.frame_idx = current_frame_number
+                    # Reset annotation workflow state when navigating
+                    st.session_state.points = []
+                    st.session_state.current_mask = None
+                    st.session_state.awaiting_decision = False
             
             with col_nav4:
                 if st.button("Next ▶️"):
                     st.session_state.frame_idx = min(video_processor.total_frames - 1, st.session_state.frame_idx + 1)
+                    # Reset annotation workflow state when navigating
+                    st.session_state.points = []
+                    st.session_state.current_mask = None
+                    st.session_state.awaiting_decision = False
             
             with col_nav5:
                 if st.button("⏩ +10"):
                     st.session_state.frame_idx = min(video_processor.total_frames - 1, st.session_state.frame_idx + 10)
+                    # Reset annotation workflow state when navigating
+                    st.session_state.points = []
+                    st.session_state.current_mask = None
+                    st.session_state.awaiting_decision = False
             
             # 3. Keep the slider for large jumps
             frame_idx = st.slider(
@@ -223,10 +246,13 @@ def main():
             # Update session state if slider was moved
             if frame_idx != st.session_state.frame_idx:
                 st.session_state.frame_idx = frame_idx
+                # Reset annotation workflow state when navigating
+                st.session_state.points = []
+                st.session_state.current_mask = None
+                st.session_state.awaiting_decision = False
             else:
                 # Use the value from session state (which might have been updated by buttons)
                 frame_idx = st.session_state.frame_idx
-            
 
             # Get and resize frame
             original_frame = video_processor.get_frame(frame_idx)
@@ -237,74 +263,90 @@ def main():
             # Resize frame to match canvas dimensions
             current_frame = resize_frame(original_frame, CANVAS_WIDTH, CANVAS_HEIGHT)
             
-            # Display instructions based on selected tool
-            if st.session_state.prompt_type == "point":
-                st.write("👆 **Click on the image to place a point prompt**")
-            elif st.session_state.prompt_type == "box":
-                st.write("👆 **Click and drag on the image to create a box prompt**")
-            
-            # Display the image with click detection
-            coordinates = streamlit_image_coordinates.streamlit_image_coordinates(
-                current_frame,
-                key=f"frame_image_{frame_idx}"
-            )
-            
-            # Process click if coordinates are received
-            if coordinates:
-                click_x = coordinates['x']
-                click_y = coordinates['y']
-                
-                st.session_state.click_x = click_x
-                st.session_state.click_y = click_y
-                
-                # Add point to session state
+            # Display instructions based on selected tool and state
+            if not st.session_state.awaiting_decision:
                 if st.session_state.prompt_type == "point":
-                    is_positive = point_type == "Foreground" if 'point_type' in locals() else True
-                    st.session_state.points.append((click_x, click_y, is_positive))
+                    st.write("👆 **Click on the image to place a point prompt**")
+                elif st.session_state.prompt_type == "box":
+                    st.write("👆 **Click and drag on the image to create a box prompt**")
+            else:
+                st.write("✅ **Decide whether to save or cancel this annotation**")
+            
+            # Only allow new clicks if not awaiting decision on current point
+            if not st.session_state.awaiting_decision:
+                # Display the image with click detection
+                coordinates = streamlit_image_coordinates.streamlit_image_coordinates(
+                    current_frame,
+                    key=f"frame_image_{frame_idx}"
+                )
                 
-                # Generate mask from the prompts
-                if st.session_state.prompt_type == "point":
-                    mask = sam_model.predict(
-                        current_frame, 
-                        prompt_type="point", 
-                        points=st.session_state.points
-                    )
-                elif st.session_state.prompt_type == "box" and len(st.session_state.boxes) > 0:
-                    mask = sam_model.predict(
-                        current_frame, 
-                        prompt_type="box", 
-                        boxes=st.session_state.boxes
-                    )
-                else:
-                    mask = None
+                # Process click if coordinates are received
+                if coordinates:
+                    click_x = coordinates['x']
+                    click_y = coordinates['y']
+                    
+                    st.session_state.click_x = click_x
+                    st.session_state.click_y = click_y
+                    
+                    # Add point to session state (single point only)
+                    if st.session_state.prompt_type == "point":
+                        is_positive = point_type == "Foreground" if 'point_type' in locals() else True
+                        # Replace points array with just this single point
+                        st.session_state.points = [(click_x, click_y, is_positive)]
+                    
+                    # Generate mask from the single point
+                    if st.session_state.prompt_type == "point":
+                        mask = sam_model.predict(
+                            current_frame, 
+                            prompt_type="point", 
+                            points=st.session_state.points
+                        )
+                    elif st.session_state.prompt_type == "box" and len(st.session_state.boxes) > 0:
+                        mask = sam_model.predict(
+                            current_frame, 
+                            prompt_type="box", 
+                            boxes=st.session_state.boxes
+                        )
+                    else:
+                        mask = None
+                    
+                    st.session_state.current_mask = mask
+                    
+                    # Set flag to show save/cancel buttons
+                    if mask is not None:
+                        st.session_state.awaiting_decision = True
+                        st.experimental_rerun()
+            
+            # If we have a mask to show (and are awaiting decision)
+            if st.session_state.current_mask is not None and st.session_state.awaiting_decision:
+                # Create visualization
+                mask = st.session_state.current_mask
+                colored_mask = np.zeros_like(current_frame)
+                colored_mask[:,:,1] = mask * 255  # Green channel
                 
-                st.session_state.current_mask = mask
+                # Draw points on the image
+                result = current_frame.copy()
+                for pt_x, pt_y, is_pos in st.session_state.points:
+                    color = (0, 255, 0) if is_pos else (0, 0, 255)
+                    cv2.circle(result, (pt_x, pt_y), 5, color, -1)
                 
-                if mask is not None:
-                    # Create visualization
-                    colored_mask = np.zeros_like(current_frame)
-                    colored_mask[:,:,1] = mask * 255  # Green channel
-                    
-                    # Draw points on the image
-                    result = current_frame.copy()
-                    for pt_x, pt_y, is_pos in st.session_state.points:
-                        color = (0, 255, 0) if is_pos else (0, 0, 255)
-                        cv2.circle(result, (pt_x, pt_y), 5, color, -1)
-                    
-                    # Draw boxes if any
-                    for box in st.session_state.boxes:
-                        x1, y1, x2, y2 = box
-                        cv2.rectangle(result, (x1, y1), (x2, y2), (255, 0, 0), 2)
-                    
-                    # Blend original image with mask
-                    alpha = 0.7
-                    result = cv2.addWeighted(result, alpha, colored_mask, 1-alpha, 0)
-                    
-                    # Display the result
-                    st.image(result, caption=f"Frame {frame_idx} with Segmentation")
-                    
-                    # Add Save button for this segmentation
-                    if st.button("Save Annotation"):
+                # Draw boxes if any
+                for box in st.session_state.boxes:
+                    x1, y1, x2, y2 = box
+                    cv2.rectangle(result, (x1, y1), (x2, y2), (255, 0, 0), 2)
+                
+                # Blend original image with mask
+                alpha = 0.7
+                result = cv2.addWeighted(result, alpha, colored_mask, 1-alpha, 0)
+                
+                # Display the result
+                st.image(result, caption=f"Frame {frame_idx} with Segmentation")
+                
+                # Create columns for save/cancel buttons
+                col_save, col_cancel = st.columns(2)
+                
+                with col_save:
+                    if st.button("Save This Annotation"):
                         # Store annotation in session state
                         if str(frame_idx) not in st.session_state.annotations["frames"]:
                             st.session_state.annotations["frames"][str(frame_idx)] = []
@@ -322,10 +364,6 @@ def main():
                         
                         # Optional: Export in YOLO format if requested
                         if export_format == "YOLO" and 'yolo_label' in locals():
-                            # Create temporary path for the frame image
-                            # temp_img_path = os.path.join(tempfile.gettempdir(), f"frame_{frame_idx}.jpg")
-                            # cv2.imwrite(temp_img_path, cv2.cvtColor(original_frame, cv2.COLOR_RGB2BGR))
-
                             # Create 'annotation' directory at the project root if it doesn't exist
                             annotation_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "annotation")
                             os.makedirs(annotation_dir, exist_ok=True)
@@ -344,17 +382,23 @@ def main():
                                 yolo_label
                             )
                         
-                        # Clear points and boxes after saving
+                        # Clear points, mask, and reset workflow state
                         st.session_state.points = []
-                        st.session_state.boxes = []
+                        st.session_state.current_mask = None
+                        st.session_state.awaiting_decision = False
                         st.experimental_rerun()
                 
-            # Add a clear button
-            if st.button("Clear Prompts"):
-                st.session_state.points = []
-                st.session_state.boxes = []
-                st.session_state.current_mask = None
-                st.experimental_rerun()
+                with col_cancel:
+                    if st.button("Cancel Annotation"):
+                        # Clear points, mask, and reset workflow state
+                        st.session_state.points = []
+                        st.session_state.current_mask = None
+                        st.session_state.awaiting_decision = False
+                        st.experimental_rerun()
+            
+            # Display the base image if not showing the mask
+            elif not st.session_state.awaiting_decision:
+                st.image(current_frame, caption=f"Frame {frame_idx}")
             
         # Annotations section
         st.header("Annotations")
