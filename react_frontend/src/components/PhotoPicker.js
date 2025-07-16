@@ -12,12 +12,18 @@ const PhotoPicker = () => {
   const imageRef = useRef(null);
   const ws = useRef(null);
 
+  const [maskURL, setMaskURL] = useState(null);
+
   // Open WebSocket connection
   useEffect(() => {
     ws.current = new WebSocket("ws://localhost:8080"); // Change to your server URL
 
     ws.current.onopen = () => {
       console.log("WebSocket connected");
+      ws.current.onmessage = (event) => {
+        console.log("Received message:", event.data);
+        
+      };
     };
 
     ws.current.onerror = (err) => {

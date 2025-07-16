@@ -33,13 +33,17 @@
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
+.photo-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
 .green-dot {
   position: absolute;
   width: 10px;
   height: 10px;
-  background-color: limegreen;
+  background: #0f0;
   border-radius: 50%;
   transform: translate(-50%, -50%);
-  pointer-events: none;
-  z-index: 10;
+  z-index: 3;
 }
