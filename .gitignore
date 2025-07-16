@@ -172,3 +172,5 @@ artifacts/
 
 /test
 /input
+/react_frontend/test
+/react_frontend/node_modules
