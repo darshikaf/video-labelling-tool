@@ -18,7 +18,7 @@ class SAMModel:
         """
         self.model_type = model_type
         # Load the SAM model
-        model_path = Path(__file__).parent.parent.parent / "models" / "sam2.1_b.pt"
+        model_path = Path(__file__).parent.parent.parent / "models" / "sam_b.pt"
         model_dir = model_path.parent
         
         # Create models directory if it doesn't exist
@@ -210,6 +210,8 @@ class SAMModel:
 
                     if len(normalized_points) > 2:
                         label_file.write(f"{label} " + " ".join(normalized_points) + "\n")
+                        print(f"Saved label for contour with {len(normalized_points)} points")
                         cv2.imwrite(frame_path, cv2.cvtColor(image_frame, cv2.COLOR_RGB2BGR))
+                        print(f"Frame saved at {frame_path}")
         
         print(f"Labels saved in YOLO format at {label_path}")
