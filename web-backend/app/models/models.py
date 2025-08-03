@@ -22,7 +22,8 @@ class Project(Base):
     __tablename__ = "projects"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, nullable=False)
+    name = Column(String, nullable=False, unique=True)  # System-generated unique name
+    display_name = Column(String, nullable=False)  # User-provided display name
     description = Column(Text, nullable=True)
     annotation_format = Column(String, nullable=False, default='YOLO')  # YOLO, COCO, PASCAL_VOC
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)

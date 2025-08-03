@@ -19,7 +19,7 @@ class User(UserBase):
 
 
 class ProjectBase(BaseModel):
-    name: str
+    name: str  # User input that becomes display_name
     description: Optional[str] = None
     annotation_format: str = 'YOLO'  # YOLO, COCO, PASCAL_VOC
 
@@ -28,8 +28,12 @@ class ProjectCreate(ProjectBase):
     categories: Optional[List[str]] = None
 
 
-class Project(ProjectBase):
+class Project(BaseModel):
     id: int
+    name: str  # System-generated unique name
+    display_name: str  # User-provided display name  
+    description: Optional[str] = None
+    annotation_format: str = 'YOLO'
     owner_id: int
     created_at: datetime
     updated_at: Optional[datetime]
