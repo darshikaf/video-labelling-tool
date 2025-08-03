@@ -6,8 +6,15 @@ A modern web application for medical video annotation using SAM (Segment Anythin
 
 - **Frontend**: React + TypeScript + Material-UI + Redux Toolkit
 - **Backend**: FastAPI + PostgreSQL + SQLAlchemy 
+- **Object Storage**: MinIO (Development) / AWS S3 (Production) - for mask and binary data
 - **SAM Service**: Ultralytics SAM + Redis caching
 - **Deployment**: Docker + Docker Compose (Development) / EKS (Production)
+
+### Hybrid Storage Architecture
+
+- **PostgreSQL**: Metadata, relationships, SAM prompts, coordinates
+- **MinIO/S3**: Binary files (PNG masks, video frames, extracted images)
+- **Local Storage**: Original video files during processing
 
 ## Features
 
@@ -45,6 +52,8 @@ cd video-labelling-tool
 - Backend API: http://localhost:8000
 - SAM Service: http://localhost:8001
 - API Documentation: http://localhost:8000/docs
+- **MinIO Console**: http://localhost:9001 (admin interface)
+- **MinIO API**: http://localhost:9000 (object storage)
 
 ### Manual Setup
 
@@ -59,7 +68,7 @@ cp .env.example .env
 docker-compose up --build
 
 # Or specific services
-docker-compose up --build frontend backend sam-service database redis
+docker-compose up --build frontend backend sam-service database redis minio
 ```
 
 3. View logs:
@@ -105,6 +114,19 @@ curl http://localhost:8001/health
 curl -X POST http://localhost:8001/predict \
   -H "Content-Type: application/json" \
   -d '{"image_data": "base64_image", "prompt_type": "point", "points": [{"x": 100, "y": 100, "is_positive": true}]}'
+```
+
+### MinIO Object Storage
+```bash
+# Access MinIO admin console
+open http://localhost:9001
+# Login: minioadmin / minioadmin
+
+# Check MinIO health
+curl http://localhost:9000/minio/health/live
+
+# List buckets (using mc client)
+docker run --rm --network host minio/mc ls minio
 ```
 
 ## Project Structure
@@ -155,6 +177,7 @@ video-labelling-tool/
 - `GET /api/v1/frames/{id}/annotations` - Get frame annotations
 - `POST /api/v1/frames/{id}/annotations` - Create annotation
 - `PUT /api/v1/annotations/{id}` - Update annotation
+- `GET /api/v1/annotations/{id}/mask-url` - Get presigned URL for mask
 
 ### SAM Service
 - `POST /sam/predict` - Generate mask from prompts
@@ -164,11 +187,21 @@ video-labelling-tool/
 
 Core tables:
 - `users` - User accounts
-- `projects` - Annotation projects
-- `videos` - Uploaded videos
+- `projects` - Annotation projects  
+- `videos` - Uploaded videos (metadata only)
 - `frames` - Video frame references
 - `categories` - Annotation categories
-- `annotations` - Mask annotations with SAM metadata
+- `annotations` - Mask metadata + object storage keys (no binary data)
+
+Object storage structure:
+```
+video-annotations/
+├── projects/{id}/
+│   └── videos/{id}/
+│       └── frames/{num}/
+│           └── annotations/{id}/
+│               └── mask.png
+```
 
 ## Deployment
 
@@ -195,6 +228,7 @@ kubectl apply -f k8s/
 3. Configure services:
 - Set up RDS for PostgreSQL
 - Set up ElastiCache for Redis
+- Set up S3 for object storage (replace MinIO)
 - Configure ALB for load balancing
 - Set up EFS for video storage
 
@@ -214,6 +248,33 @@ kubectl apply -f k8s/
 2. **Database connection errors**: Ensure PostgreSQL is running and credentials are correct
 3. **Redis connection fails**: Check Redis service status
 4. **Video upload fails**: Check file permissions and upload directory exists
+5. **MinIO connection fails**: Ensure MinIO service is running on ports 9000/9001
+6. **Annotation mask not loading**: Check presigned URL expiration and MinIO bucket permissions
+
+### MinIO Access & Configuration
+
+**Admin Console Access:**
+- URL: http://localhost:9001
+- Username: `minioadmin`  
+- Password: `minioadmin`
+
+**API Configuration:**
+```bash
+# Environment variables for backend
+MINIO_ENDPOINT=localhost:9000
+MINIO_ACCESS_KEY=minioadmin
+MINIO_SECRET_KEY=minioadmin
+MINIO_BUCKET=video-annotations
+```
+
+**Bucket Management:**
+```bash
+# Access MinIO console to:
+# - View stored masks and files
+# - Monitor storage usage
+# - Configure bucket policies
+# - Generate access keys for production
+```
 
 ### Logs
 
