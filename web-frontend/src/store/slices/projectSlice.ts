@@ -26,8 +26,8 @@ export const fetchProjects = createAsyncThunk(
 
 export const createProject = createAsyncThunk(
   'project/createProject',
-  async ({ name, description }: { name: string; description?: string }) => {
-    const response = await projectAPI.createProject(name, description)
+  async ({ name, description, categories }: { name: string; description?: string; categories?: string[] }) => {
+    const response = await projectAPI.createProject(name, description, categories)
     return response
   }
 )

@@ -14,9 +14,17 @@ import {
   DialogContent,
   TextField,
   DialogActions,
-  CircularProgress
+  CircularProgress,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Chip,
+  Autocomplete,
+  Divider,
+  FormHelperText
 } from '@mui/material'
-import { Add as AddIcon } from '@mui/icons-material'
+import { Add as AddIcon, Delete as DeleteIcon } from '@mui/icons-material'
 import { RootState } from '@/store/store'
 import { fetchProjects, createProject } from '@/store/slices/projectSlice'
 
@@ -28,22 +36,64 @@ export const DashboardPage = () => {
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [newProjectName, setNewProjectName] = useState('')
   const [newProjectDescription, setNewProjectDescription] = useState('')
+  
+  // Category management state
+  const [selectedCategories, setSelectedCategories] = useState<string[]>(['Person'])
+  const [customCategory, setCustomCategory] = useState('')
+  
+  // Predefined categories for common medical/general use cases
+  const predefinedCategories = [
+    'Person', 'Vehicle', 'Animal', 'Object', 
+    'Anatomy', 'Lesion', 'Tool', 'Equipment',
+    'Background', 'Artifact', 'Normal', 'Abnormal'
+  ]
 
   useEffect(() => {
     dispatch(fetchProjects())
   }, [dispatch])
 
+  // Category helper functions
+  const handleAddCustomCategory = () => {
+    if (customCategory.trim() && !selectedCategories.includes(customCategory.trim())) {
+      setSelectedCategories([...selectedCategories, customCategory.trim()])
+      setCustomCategory('')
+    }
+  }
+
+  const handleRemoveCategory = (categoryToRemove: string) => {
+    setSelectedCategories(selectedCategories.filter(cat => cat !== categoryToRemove))
+  }
+
+  const handleTogglePredefinedCategory = (category: string) => {
+    if (selectedCategories.includes(category)) {
+      handleRemoveCategory(category)
+    } else {
+      setSelectedCategories([...selectedCategories, category])
+    }
+  }
+
+  const resetDialog = () => {
+    setCreateDialogOpen(false)
+    setNewProjectName('')
+    setNewProjectDescription('')
+    setSelectedCategories(['Person'])
+    setCustomCategory('')
+  }
+
   const handleCreateProject = async () => {
     if (!newProjectName.trim()) return
+    if (selectedCategories.length === 0) {
+      alert('Please select at least one annotation category')
+      return
+    }
     
     try {
       const result = await dispatch(createProject({
         name: newProjectName,
-        description: newProjectDescription
+        description: newProjectDescription,
+        categories: selectedCategories
       }))
-      setCreateDialogOpen(false)
-      setNewProjectName('')
-      setNewProjectDescription('')
+      resetDialog()
       
       // Navigate to the new project
       if (result.payload?.id) {
@@ -121,33 +171,126 @@ export const DashboardPage = () => {
       </Grid>
 
       {/* Create Project Dialog */}
-      <Dialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog open={createDialogOpen} onClose={resetDialog} maxWidth="md" fullWidth>
         <DialogTitle>Create New Project</DialogTitle>
-        <DialogContent>
-          <TextField
-            autoFocus
-            margin="dense"
-            label="Project Name"
-            fullWidth
-            variant="outlined"
-            value={newProjectName}
-            onChange={(e) => setNewProjectName(e.target.value)}
-            sx={{ mb: 2 }}
-          />
-          <TextField
-            margin="dense"
-            label="Description (optional)"
-            fullWidth
-            multiline
-            rows={3}
-            variant="outlined"
-            value={newProjectDescription}
-            onChange={(e) => setNewProjectDescription(e.target.value)}
-          />
+        <DialogContent sx={{ pt: 2 }}>
+          <Grid container spacing={3}>
+            {/* Basic Project Info */}
+            <Grid item xs={12}>
+              <TextField
+                autoFocus
+                label="Project Name"
+                fullWidth
+                variant="outlined"
+                value={newProjectName}
+                onChange={(e) => setNewProjectName(e.target.value)}
+                sx={{ mb: 2 }}
+              />
+              <TextField
+                label="Description (optional)"
+                fullWidth
+                multiline
+                rows={3}
+                variant="outlined"
+                value={newProjectDescription}
+                onChange={(e) => setNewProjectDescription(e.target.value)}
+              />
+            </Grid>
+
+            {/* Category Selection */}
+            <Grid item xs={12}>
+              <Divider sx={{ my: 2 }} />
+              <Typography variant="h6" gutterBottom>
+                Annotation Categories
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Select the categories you'll use for annotating objects in your videos. You can choose from predefined categories or add custom ones.
+              </Typography>
+
+              {/* Selected Categories */}
+              <Box sx={{ mb: 2 }}>
+                <Typography variant="subtitle2" gutterBottom>
+                  Selected Categories ({selectedCategories.length}):
+                </Typography>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                  {selectedCategories.map((category) => (
+                    <Chip
+                      key={category}
+                      label={category}
+                      onDelete={() => handleRemoveCategory(category)}
+                      deleteIcon={<DeleteIcon />}
+                      color="primary"
+                      variant="outlined"
+                    />
+                  ))}
+                  {selectedCategories.length === 0 && (
+                    <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                      No categories selected
+                    </Typography>
+                  )}
+                </Box>
+              </Box>
+
+              {/* Predefined Categories */}
+              <Box sx={{ mb: 2 }}>
+                <Typography variant="subtitle2" gutterBottom>
+                  Predefined Categories:
+                </Typography>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                  {predefinedCategories.map((category) => (
+                    <Chip
+                      key={category}
+                      label={category}
+                      onClick={() => handleTogglePredefinedCategory(category)}
+                      color={selectedCategories.includes(category) ? "primary" : "default"}
+                      variant={selectedCategories.includes(category) ? "filled" : "outlined"}
+                      sx={{ cursor: 'pointer' }}
+                    />
+                  ))}
+                </Box>
+              </Box>
+
+              {/* Custom Category Input */}
+              <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-end' }}>
+                <TextField
+                  label="Add Custom Category"
+                  variant="outlined"
+                  size="small"
+                  value={customCategory}
+                  onChange={(e) => setCustomCategory(e.target.value)}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      handleAddCustomCategory()
+                    }
+                  }}
+                  sx={{ flexGrow: 1 }}
+                />
+                <Button
+                  variant="outlined"
+                  onClick={handleAddCustomCategory}
+                  disabled={!customCategory.trim()}
+                  sx={{ height: 'fit-content' }}
+                >
+                  Add
+                </Button>
+              </Box>
+
+              {selectedCategories.length === 0 && (
+                <FormHelperText error sx={{ mt: 1 }}>
+                  Please select at least one annotation category
+                </FormHelperText>
+              )}
+            </Grid>
+          </Grid>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setCreateDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleCreateProject} variant="contained">
+          <Button onClick={resetDialog}>Cancel</Button>
+          <Button 
+            onClick={handleCreateProject} 
+            variant="contained"
+            disabled={!newProjectName.trim() || selectedCategories.length === 0}
+          >
             Create Project
           </Button>
         </DialogActions>

@@ -2,6 +2,19 @@ import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import { Box, Button, ButtonGroup, Typography, FormControl, InputLabel, Select, MenuItem } from '@mui/material'
 import { PolygonPoint } from '@/types'
 
+/**
+ * COORDINATE SYSTEM DOCUMENTATION:
+ * 
+ * This component uses a standardized 640x480 coordinate system for all annotation data:
+ * - SAM points and boxes are stored in 640x480 coordinates
+ * - Polygon points are stored in 640x480 coordinates
+ * - The canvas display may have different dimensions, but all data is transformed
+ *   from 640x480 to canvas coordinates for rendering
+ * 
+ * This ensures consistency across the entire annotation pipeline regardless of
+ * the actual display size or original image dimensions.
+ */
+
 interface AnnotationCanvasProps {
   frameImageUrl: string | null
   width?: number
@@ -98,18 +111,36 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
 
   // Helper function to transform coordinates from 640x480 SAM space to canvas space
   const samToCanvasCoords = useCallback((samX: number, samY: number) => {
-    if (!imageScalingRef.current) return { x: samX, y: samY }
+    if (!imageScalingRef.current) {
+      console.warn('No image scaling info available, returning raw coordinates')
+      return { x: samX, y: samY }
+    }
     
     const { drawWidth, drawHeight, offsetX, offsetY } = imageScalingRef.current
+    
+    // Validate input coordinates are within expected SAM space
+    if (samX < 0 || samX > 640 || samY < 0 || samY > 480) {
+      console.warn('SAM coordinates out of expected 640x480 range:', { samX, samY })
+    }
     
     // Convert from 640x480 SAM coordinates to canvas coordinates
     const relativeX = samX / 640
     const relativeY = samY / 480
     
-    return {
-      x: relativeX * drawWidth + offsetX,
-      y: relativeY * drawHeight + offsetY
+    const canvasX = relativeX * drawWidth + offsetX
+    const canvasY = relativeY * drawHeight + offsetY
+    
+    // Debug logging for coordinate transformation
+    if (Math.random() < 0.1) { // Log 10% of transformations to avoid spam
+      console.log('SAM to Canvas transformation:', {
+        input: { samX, samY },
+        relative: { relativeX, relativeY },
+        canvas: { canvasX, canvasY },
+        scaling: { drawWidth, drawHeight, offsetX, offsetY }
+      })
     }
+    
+    return { x: canvasX, y: canvasY }
   }, [])
 
   // Helper function to transform coordinates from image to canvas space (legacy - keep for non-polygon features)
@@ -259,6 +290,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
         const maskImage = new Image()
         maskImage.onload = () => {
           console.log('DEBUG: Mask image loaded, dimensions:', { width: maskImage.width, height: maskImage.height })
+          console.log('DEBUG: Expected image scaling info:', imageScalingRef.current)
           
           // Create a temporary canvas to process the mask
           const tempCanvas = document.createElement('canvas')
@@ -345,7 +377,26 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
           }
           
           // Draw the processed mask onto the main canvas
-          ctx.drawImage(tempCanvas, 0, 0, width, height)
+          // ENFORCED STANDARD: All masks must be 640x480 from SAM backend
+          if (maskImage.width !== 640 || maskImage.height !== 480) {
+            console.error(`Invalid mask dimensions: ${maskImage.width}x${maskImage.height}, expected 640x480. This indicates a backend issue.`)
+            console.error('Mask will be displayed but may have alignment issues.')
+          }
+          
+          if (imageScalingRef.current) {
+            const { drawWidth, drawHeight, offsetX, offsetY } = imageScalingRef.current
+            
+            // Always scale from 640x480 SAM space to display area
+            console.log('DEBUG: Drawing 640x480 mask scaled to display area:', {
+              maskDimensions: { width: maskImage.width, height: maskImage.height },
+              displayArea: { width: drawWidth, height: drawHeight, offsetX, offsetY }
+            })
+            ctx.drawImage(tempCanvas, offsetX, offsetY, drawWidth, drawHeight)
+          } else {
+            // Fallback to full canvas if no scaling info available
+            console.warn('DEBUG: No image scaling info available, falling back to full canvas')
+            ctx.drawImage(tempCanvas, 0, 0, width, height)
+          }
           console.log('DEBUG: Mask overlay drawn to main canvas with', maskPixelCount, 'mask pixels')
         }
         
@@ -459,22 +510,30 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
 
     // Draw polygon in editing mode
     if (isPolygonMode && polygonPoints.length > 0) {
-      console.log('Drawing polygon in editing mode using SAM coordinate system:', {
-        polygonPoints: polygonPoints,
-        imageScaling: imageScalingRef.current
+      // Validate polygon points are in expected coordinate space
+      const outOfBoundsPoints = polygonPoints.filter(p => p.x < 0 || p.x > 640 || p.y < 0 || p.y > 480)
+      if (outOfBoundsPoints.length > 0) {
+        console.warn('Polygon points outside expected 640x480 range:', outOfBoundsPoints)
+      }
+      
+      console.log('Drawing polygon in editing mode:', {
+        polygonPointsCount: polygonPoints.length,
+        coordinateSpace: '640x480 (SAM standard)',
+        imageScaling: imageScalingRef.current,
+        samplePoints: polygonPoints.slice(0, 3)
       })
       
-      // FIXED: Convert polygon points from 640x480 to canvas coordinates
-      // Use the same transformation as SAM points for consistency
-      const canvasPoints = polygonPoints.map(point => {
-        if (!imageScalingRef.current) return { x: point.x, y: point.y }
+      // Convert polygon points from 640x480 SAM space to canvas coordinates
+      // This uses the exact same transformation as SAM points for consistency
+      const canvasPoints = polygonPoints.map((point, index) => {
+        const canvasCoords = samToCanvasCoords(point.x, point.y)
         
-        // Convert from 640x480 coordinates to canvas coordinates (same as SAM)
-        const canvasX = (point.x / 640) * imageScalingRef.current.drawWidth + imageScalingRef.current.offsetX
-        const canvasY = (point.y / 480) * imageScalingRef.current.drawHeight + imageScalingRef.current.offsetY
+        // Log first few transformations for debugging
+        if (index < 3) {
+          console.log(`Polygon point ${index}: ${point.x},${point.y} (640x480) → ${canvasCoords.x.toFixed(1)},${canvasCoords.y.toFixed(1)} (canvas)`)
+        }
         
-        console.log(`Converting polygon point ${point.x},${point.y} (640x480) to canvas ${canvasX},${canvasY}`)
-        return { x: canvasX, y: canvasY }
+        return canvasCoords
       })
       
       if (canvasPoints.length >= 2) {

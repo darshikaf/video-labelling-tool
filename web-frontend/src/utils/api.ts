@@ -38,17 +38,22 @@ export const authAPI = {
 
 export const projectAPI = {
   getProjects: async (): Promise<Project[]> => {
-    const response = await apiClient.get('/projects')
+    const response = await apiClient.get('/projects/')
     return response.data
   },
 
-  createProject: async (name: string, description?: string): Promise<Project> => {
-    const response = await apiClient.post('/projects', { name, description })
+  createProject: async (name: string, description?: string, categories?: string[]): Promise<Project> => {
+    const response = await apiClient.post('/projects/', { name, description, categories })
     return response.data
   },
 
   getProject: async (id: number): Promise<Project> => {
     const response = await apiClient.get(`/projects/${id}`)
+    return response.data
+  },
+
+  getProjectCategories: async (projectId: number): Promise<Array<{id: number, name: string, color: string}>> => {
+    const response = await apiClient.get(`/projects/${projectId}/categories`)
     return response.data
   },
 }
@@ -105,6 +110,11 @@ export const annotationAPI = {
 
   deleteAnnotation: async (annotationId: number): Promise<void> => {
     await apiClient.delete(`/annotations/${annotationId}`)
+  },
+
+  getAnnotationMaskUrl: async (annotationId: number): Promise<{mask_url: string}> => {
+    const response = await apiClient.get(`/annotations/${annotationId}/mask-url`)
+    return response.data
   },
 }
 

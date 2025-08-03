@@ -24,7 +24,7 @@ class ProjectBase(BaseModel):
 
 
 class ProjectCreate(ProjectBase):
-    pass
+    categories: Optional[List[str]] = None
 
 
 class Project(ProjectBase):
@@ -104,17 +104,21 @@ class AnnotationBase(BaseModel):
     sam_points: Optional[str] = None
     sam_boxes: Optional[str] = None
     confidence: Optional[float] = None
+    mask_width: Optional[int] = None
+    mask_height: Optional[int] = None
+    polygon_points: Optional[str] = None
 
 
 class AnnotationCreate(AnnotationBase):
     category_id: int
-    mask_data: str  # Base64 encoded mask data
+    mask_data: str  # Base64 encoded mask data (will be stored in object storage)
 
 
 class Annotation(AnnotationBase):
     id: int
     frame_id: int
     category_id: int
+    mask_storage_key: str  # Object storage key for mask
     is_reviewed: bool
     created_at: datetime
     updated_at: Optional[datetime]

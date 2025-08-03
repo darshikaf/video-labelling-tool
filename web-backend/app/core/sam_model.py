@@ -285,8 +285,25 @@ class SAMModel:
             logger.info(f"SAMModel: Total pixels: {mask.size}")
             logger.info(f"SAMModel: Mask coverage: {np.count_nonzero(mask)/mask.size*100:.2f}%")
             
+            # ENFORCE: Mask must be 640x480 to match processing resolution
+            if mask.shape != (480, 640):
+                logger.error(f"Invalid mask shape: {mask.shape}, expected (480, 640)")
+                logger.error("This indicates an issue with the SAM model or prediction process")
+                # Try to resize mask to correct dimensions if possible
+                from PIL import Image as PIL_Image
+                mask_pil = PIL_Image.fromarray((mask * 255).astype(np.uint8), mode='L')
+                mask_pil = mask_pil.resize((640, 480), PIL_Image.Resampling.NEAREST)
+                mask = np.array(mask_pil) / 255.0
+                logger.warning(f"Resized mask from {mask.shape} to (480, 640)")
+            
             # Encode mask as base64
             mask_image = Image.fromarray(mask * 255, mode='L')
+            
+            # Validate final mask dimensions
+            logger.info(f"SAMModel: Final mask image dimensions: {mask_image.size} (should be 640x480)")
+            if mask_image.size != (640, 480):
+                logger.error(f"Final mask dimensions incorrect: {mask_image.size}, expected (640, 480)")
+            
             buffer = BytesIO()
             mask_image.save(buffer, format='PNG')
             mask_base64 = base64.b64encode(buffer.getvalue()).decode()

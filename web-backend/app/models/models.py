@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Float, Boolean, LargeBinary
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Float, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -86,11 +86,15 @@ class Annotation(Base):
     id = Column(Integer, primary_key=True, index=True)
     frame_id = Column(Integer, ForeignKey("frames.id"), nullable=False)
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=False)
-    mask_data = Column(LargeBinary, nullable=False)  # Compressed binary mask
+    mask_storage_key = Column(String, nullable=False)  # Object storage key for mask
     sam_points = Column(Text, nullable=True)  # JSON string of SAM prompt points
     sam_boxes = Column(Text, nullable=True)  # JSON string of SAM prompt boxes
     confidence = Column(Float, nullable=True)
     is_reviewed = Column(Boolean, default=False)
+    # Additional metadata for model training
+    mask_width = Column(Integer, nullable=True)  # Original mask dimensions
+    mask_height = Column(Integer, nullable=True)
+    polygon_points = Column(Text, nullable=True)  # JSON string of polygon vertices if available
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

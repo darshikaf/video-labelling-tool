@@ -2,10 +2,13 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
+import json
+from PIL import Image
 
 from app import crud, models, schemas
 from app.api import deps
 from app.db.database import get_db
+from app.services.storage_service import storage_service
 
 router = APIRouter()
 
@@ -77,8 +80,7 @@ def create_annotation_for_video_frame(
 ):
     """Create annotation for a specific video frame"""
     import base64
-    import gzip
-    import json
+    import io
     
     try:
         # Get video to find project_id
@@ -92,35 +94,63 @@ def create_annotation_for_video_frame(
         # Get or create category
         category = get_or_create_category(db, video.project_id, request.category_name)
         
-        # Decode base64 mask data and compress it for storage
-        mask_bytes = base64.b64decode(request.mask_data)
-        compressed_mask = gzip.compress(mask_bytes)
+        # Get mask dimensions for metadata
+        mask_width, mask_height = 640, 480  # Default SAM dimensions
+        try:
+            # Try to decode mask data to get actual dimensions
+            mask_data = request.mask_data
+            if mask_data.startswith('data:image'):
+                mask_data = mask_data.split(',')[1]
+            mask_bytes = base64.b64decode(mask_data)
+            
+            # Get image dimensions
+            with Image.open(io.BytesIO(mask_bytes)) as img:
+                mask_width, mask_height = img.size
+        except Exception:
+            # Use defaults if unable to determine dimensions
+            pass
         
-        # Create annotation
-        annotation_data = schemas.AnnotationCreate(
-            category_id=category.id,
-            mask_data=request.mask_data,
-            sam_points=request.sam_points,
-            sam_boxes=request.sam_boxes,
-            confidence=request.confidence
+        # Create annotation record first to get ID
+        annotation_data = {
+            'frame_id': frame.id,
+            'category_id': category.id,
+            'sam_points': request.sam_points,
+            'sam_boxes': request.sam_boxes,
+            'confidence': request.confidence,
+            'mask_width': mask_width,
+            'mask_height': mask_height,
+            'mask_storage_key': ''  # Temporary, will be updated after storing
+        }
+        
+        annotation = models.Annotation(**annotation_data)
+        db.add(annotation)
+        db.flush()  # Get the ID without committing
+        
+        # Store mask in object storage
+        storage_key = storage_service.store_mask(
+            project_id=video.project_id,
+            video_id=video_id,
+            frame_number=frame_number,
+            annotation_id=annotation.id,
+            mask_data=request.mask_data
         )
         
-        annotation = crud.annotation.create_with_frame(
-            db=db, 
-            obj_in=annotation_data, 
-            frame_id=frame.id,
-            mask_data=compressed_mask
-        )
+        # Update annotation with storage key
+        annotation.mask_storage_key = storage_key
+        db.commit()
+        db.refresh(annotation)
         
         return {
             "id": annotation.id,
             "frame_id": annotation.frame_id,
             "category": {"id": category.id, "name": category.name, "color": category.color},
+            "mask_storage_key": annotation.mask_storage_key,
             "created_at": annotation.created_at
         }
         
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid annotation data: {str(e)}")
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Failed to create annotation: {str(e)}")
 
 
 @router.get("/frames/{frame_id}/annotations", response_model=List[schemas.Annotation])
@@ -135,6 +165,23 @@ def read_frame_annotations(
         db=db, frame_id=frame_id, skip=skip, limit=limit
     )
     return annotations
+
+
+@router.get("/{annotation_id}/mask-url")
+def get_annotation_mask_url(
+    annotation_id: int,
+    db: Session = Depends(get_db),
+):
+    """Get presigned URL for annotation mask"""
+    annotation = crud.annotation.get(db=db, id=annotation_id)
+    if not annotation:
+        raise HTTPException(status_code=404, detail="Annotation not found")
+    
+    try:
+        mask_url = storage_service.get_mask_url(annotation.mask_storage_key)
+        return {"mask_url": mask_url}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate mask URL: {str(e)}")
 
 
 @router.post("/frames/{frame_id}/annotations", response_model=schemas.Annotation)

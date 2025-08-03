@@ -21,7 +21,9 @@ import { setCurrentFrame } from '@/store/slices/videoSlice'
 import { VideoPlayer } from '@/components/annotation/VideoPlayer'
 import { AnnotationCanvas } from '@/components/annotation/AnnotationCanvas'
 import { setPromptType, addPoint, addBox, setAwaitingDecision, runSAMPrediction, resetAnnotationState, clearPoints, clearBoxes, setCurrentMask } from '@/store/slices/annotationSlice'
-import { annotationAPI } from '@/utils/api'
+import { annotationAPI, projectAPI } from '@/utils/api'
+import ExportDialog from '@/components/export/ExportDialog'
+import { FileDownload } from '@mui/icons-material'
 
 export const AnnotationPage = () => {
   const { projectId, videoId } = useParams<{ projectId: string; videoId: string }>()
@@ -39,11 +41,12 @@ export const AnnotationPage = () => {
     loading: annotationLoading 
   } = useSelector((state: RootState) => state.annotation)
 
-  const [selectedCategory, setSelectedCategory] = useState('Person')
-  const [categories] = useState(['Person', 'Vehicle', 'Animal', 'Object']) // Default categories
+  const [selectedCategory, setSelectedCategory] = useState('')
+  const [categories, setCategories] = useState<Array<{id: number, name: string, color: string}>>([])
   const [samLoading, setSamLoading] = useState(false)
   const [editingMode, setEditingMode] = useState<'sam' | 'polygon'>('sam')
   const [polygonPoints, setPolygonPoints] = useState<any[]>([])
+  const [exportDialogOpen, setExportDialogOpen] = useState(false)
 
   useEffect(() => {
     if (videoId) {
@@ -57,6 +60,32 @@ export const AnnotationPage = () => {
       dispatch(fetchFrame({ videoId: parseInt(videoId), frameNumber: currentFrame }))
     }
   }, [dispatch, currentVideo, videoId, currentFrame])
+
+  // Load project categories
+  useEffect(() => {
+    const loadCategories = async () => {
+      if (projectId) {
+        try {
+          const projectCategories = await projectAPI.getProjectCategories(parseInt(projectId))
+          setCategories(projectCategories)
+          // Set default category to first available category
+          if (projectCategories.length > 0 && !selectedCategory) {
+            setSelectedCategory(projectCategories[0].name)
+          }
+        } catch (error) {
+          console.error('Failed to load project categories:', error)
+          // Fallback to default categories
+          const defaultCategories = [
+            { id: 1, name: 'Person', color: '#FF6B6B' },
+            { id: 2, name: 'Object', color: '#4ECDC4' }
+          ]
+          setCategories(defaultCategories)
+          setSelectedCategory('Person')
+        }
+      }
+    }
+    loadCategories()
+  }, [projectId, selectedCategory])
 
   const handleFrameChange = (frameNumber: number) => {
     if (videoId && frameNumber !== currentFrame) {
@@ -138,36 +167,56 @@ export const AnnotationPage = () => {
   }
 
   const handleSaveAnnotation = async () => {
-    if (!currentMask || !videoId || !currentVideo) {
+    if (!currentMask || !videoId || !currentVideo || !selectedCategory) {
       console.error('Missing required data for saving annotation')
+      alert('Please ensure a category is selected and a mask is generated')
       return
     }
 
     try {
-      console.log('Saving annotation:', {
+      // Find the category object to get additional metadata
+      const categoryObj = categories.find(cat => cat.name === selectedCategory)
+      
+      console.log('Saving annotation with comprehensive metadata:', {
+        projectId,
         videoId,
+        videoName: currentVideo.filename,
         frameNumber: currentFrame,
         category: selectedCategory,
-        maskLength: currentMask.length
+        categoryId: categoryObj?.id,
+        categoryColor: categoryObj?.color,
+        maskLength: currentMask.length,
+        samPoints: selectedPoints,
+        samBoxes: selectedBoxes,
+        videoWidth: currentVideo.width,
+        videoHeight: currentVideo.height,
+        videoFps: currentVideo.fps,
+        editingMode,
+        timestamp: new Date().toISOString()
       })
 
-      await annotationAPI.createAnnotation(
+      const savedAnnotation = await annotationAPI.createAnnotation(
         parseInt(videoId),
         currentFrame,
         selectedCategory,
         currentMask,
         selectedPoints,
         selectedBoxes,
-        0.8 // Default confidence
+        0.85 // Default confidence - can be enhanced with actual SAM confidence
       )
 
-      console.log('Annotation saved successfully')
+      console.log('Annotation saved successfully with full model training metadata', {
+        annotationId: savedAnnotation.id,
+        maskStorageKey: savedAnnotation.mask_storage_key || 'Not available',
+        objectStorageEnabled: true
+      })
       dispatch(setAwaitingDecision(false))
       dispatch(resetAnnotationState())
+      setEditingMode('sam') // Reset to SAM mode after saving
       
     } catch (error) {
       console.error('Failed to save annotation:', error)
-      // Could show error toast here
+      alert('Failed to save annotation. Please try again.')
     }
   }
 
@@ -195,53 +244,46 @@ export const AnnotationPage = () => {
     }
   }
 
-  // Convert mask to polygon points (simplified version)
+  // Convert mask to polygon points - simplified for consistent 640x480 handling
   const convertMaskToPolygon = (maskData: string) => {
-    console.log('=== MASK TO POLYGON CONVERSION DEBUG ===')
+    console.log('=== MASK TO POLYGON CONVERSION (640x480 STANDARD) ===')
     console.log('Input mask data length:', maskData.length)
     
     const img = new Image()
     img.onload = () => {
       console.log('Loaded mask image:', { width: img.width, height: img.height })
       
+      // ENFORCE: All masks should be 640x480 from SAM backend
+      if (img.width !== 640 || img.height !== 480) {
+        console.error(`Invalid mask dimensions: ${img.width}x${img.height}, expected 640x480`)
+        console.error('This indicates a backend consistency issue. Proceeding with conversion but results may be misaligned.')
+      }
+      
+      // Process mask directly since it should already be 640x480
       const canvas = document.createElement('canvas')
       const ctx = canvas.getContext('2d')
       if (!ctx) return
 
-      canvas.width = img.width
-      canvas.height = img.height
-      ctx.drawImage(img, 0, 0)
+      canvas.width = 640
+      canvas.height = 480
+      ctx.drawImage(img, 0, 0, 640, 480) // Force to 640x480 if needed
 
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+      const imageData = ctx.getImageData(0, 0, 640, 480)
       const data = imageData.data
 
-      console.log('Canvas image data:', { 
-        width: canvas.width, 
-        height: canvas.height,
+      console.log('Processing mask in standard 640x480 space:', { 
+        maskDimensions: { width: img.width, height: img.height },
+        processingDimensions: { width: 640, height: 480 },
         dataLength: data.length 
       })
 
-      // Sample some pixel values for debugging
-      const samplePixels = []
-      for (let i = 0; i < Math.min(20, data.length / 4); i++) {
-        const idx = i * 4
-        samplePixels.push({
-          index: i,
-          r: data[idx],
-          g: data[idx + 1], 
-          b: data[idx + 2],
-          a: data[idx + 3]
-        })
-      }
-      console.log('Sample pixels:', samplePixels)
-
-      // Find bounding box
-      let minX = canvas.width, maxX = 0, minY = canvas.height, maxY = 0
+      // Find bounding box and pixels
+      let minX = 640, maxX = 0, minY = 480, maxY = 0
       let maskPixelCount = 0
       
-      for (let y = 0; y < canvas.height; y++) {
-        for (let x = 0; x < canvas.width; x++) {
-          const idx = (y * canvas.width + x) * 4
+      for (let y = 0; y < 480; y++) {
+        for (let x = 0; x < 640; x++) {
+          const idx = (y * 640 + x) * 4
           const value = data[idx] // R channel
           
           if (value > 128) {
@@ -261,33 +303,44 @@ export const AnnotationPage = () => {
       })
 
       if (maskPixelCount > 0) {
-        console.log('Converting mask bounding box - using consistent 640x480 coordinate space')
+        console.log('Tracing mask contour in 640x480 coordinate space')
         
-        // FIXED APPROACH: Keep everything in 640x480 coordinate space for consistency
-        // The mask is in 640x480 coordinate space (from SAM)
-        // Keep polygon points in the SAME coordinate space (640x480)
-        // This eliminates coordinate transformation conflicts
+        // Trace the contour of the mask to get actual boundary points
+        const contourPoints = traceMaskContour(imageData, 640, 480)
         
-        console.log('Mask dimensions:', { width: canvas.width, height: canvas.height })
-        console.log('Mask bounding box in 640x480 space:', { minX, minY, maxX, maxY })
-        
-        // Create polygon points directly from mask coordinates (no scaling)
-        // Keep in 640x480 space, same as SAM system
-        const points = [
-          { x: Math.round(minX), y: Math.round(minY) },
-          { x: Math.round(maxX), y: Math.round(minY) }, 
-          { x: Math.round(maxX), y: Math.round(maxY) },
-          { x: Math.round(minX), y: Math.round(maxY) }
-        ]
-        
-        console.log('Created polygon points in 640x480 coordinate space:', {
-          maskDimensions: { width: canvas.width, height: canvas.height },
-          boundingBox: { minX, minY, maxX, maxY },
-          polygonPoints: points,
-          coordinateSpace: '640x480 (same as SAM)'
-        })
-        
-        setPolygonPoints(points)
+        if (contourPoints.length > 0) {
+          console.log('Traced contour with', contourPoints.length, 'points')
+          
+          // Simplify the contour to reduce number of points for better editing
+          const simplifiedPoints = simplifyContour(contourPoints, 1.5)
+          
+          console.log('Simplified contour to', simplifiedPoints.length, 'points')
+          
+          console.log('Created polygon points from mask contour:', {
+            coordinateSpace: '640x480 (SAM standard)',
+            contourPoints: contourPoints.length,
+            simplifiedPoints: simplifiedPoints.length,
+            firstFewPoints: simplifiedPoints.slice(0, 5),
+            boundingBox: {
+              minX: Math.min(...simplifiedPoints.map(p => p.x)),
+              minY: Math.min(...simplifiedPoints.map(p => p.y)), 
+              maxX: Math.max(...simplifiedPoints.map(p => p.x)),
+              maxY: Math.max(...simplifiedPoints.map(p => p.y))
+            }
+          })
+          
+          setPolygonPoints(simplifiedPoints)
+        } else {
+          console.log('Contour tracing failed, falling back to bounding box')
+          // Fallback to bounding box
+          const points = [
+            { x: minX, y: minY },
+            { x: maxX, y: minY }, 
+            { x: maxX, y: maxY },
+            { x: minX, y: maxY }
+          ]
+          setPolygonPoints(points)
+        }
       } else {
         console.log('WARNING: No mask pixels found!')
       }
@@ -303,6 +356,190 @@ export const AnnotationPage = () => {
     } else {
       img.src = `data:image/png;base64,${maskData}`
     }
+  }
+
+  // Improved contour tracing using edge detection approach
+  const traceMaskContour = (imageData: ImageData, width: number, height: number): PolygonPoint[] => {
+    const data = imageData.data
+    const contour: PolygonPoint[] = []
+    
+    console.log('Starting contour tracing on', width, 'x', height, 'image')
+    
+    // Create a binary mask for easier processing
+    const binaryMask = new Array(width * height).fill(0)
+    let maskPixels = 0
+    
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = (y * width + x) * 4
+        if (data[idx] > 128) {
+          binaryMask[y * width + x] = 1
+          maskPixels++
+        }
+      }
+    }
+    
+    console.log('Found', maskPixels, 'mask pixels')
+    
+    if (maskPixels === 0) return []
+    
+    // Find the topmost, leftmost mask pixel for a consistent starting point
+    let startX = -1, startY = -1
+    for (let y = 0; y < height && startX === -1; y++) {
+      for (let x = 0; x < width && startX === -1; x++) {
+        if (binaryMask[y * width + x] === 1) {
+          // Check if this is a boundary pixel (has at least one non-mask neighbor)
+          let isBoundary = false
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              if (dx === 0 && dy === 0) continue
+              const nx = x + dx
+              const ny = y + dy
+              if (nx < 0 || nx >= width || ny < 0 || ny >= height || binaryMask[ny * width + nx] === 0) {
+                isBoundary = true
+                break
+              }
+            }
+            if (isBoundary) break
+          }
+          
+          if (isBoundary) {
+            startX = x
+            startY = y
+          }
+        }
+      }
+    }
+    
+    if (startX === -1) return []
+    
+    console.log('Starting contour trace from:', startX, startY)
+    
+    // Use a more accurate boundary following algorithm
+    // Find boundary pixels using edge detection
+    const boundaryPixels: PolygonPoint[] = []
+    
+    for (let y = 1; y < height - 1; y++) {
+      for (let x = 1; x < width - 1; x++) {
+        if (binaryMask[y * width + x] === 1) {
+          // Check if this pixel is on the boundary (has non-mask neighbors)
+          let isBoundary = false
+          const neighbors = [
+            [-1, -1], [-1, 0], [-1, 1],
+            [0, -1],           [0, 1],
+            [1, -1],  [1, 0],  [1, 1]
+          ]
+          
+          for (const [dx, dy] of neighbors) {
+            const nx = x + dx
+            const ny = y + dy
+            if (binaryMask[ny * width + nx] === 0) {
+              isBoundary = true
+              break
+            }
+          }
+          
+          if (isBoundary) {
+            // Add slight offset to center the polygon on pixel boundaries
+            // This helps with visual alignment precision
+            boundaryPixels.push({ x: x + 0.5, y: y + 0.5 })
+          }
+        }
+      }
+    }
+    
+    console.log('Found', boundaryPixels.length, 'boundary pixels')
+    
+    if (boundaryPixels.length === 0) return []
+    
+    // Sort boundary pixels to create a proper contour
+    // Start from the topmost, leftmost point
+    boundaryPixels.sort((a, b) => {
+      if (a.y !== b.y) return a.y - b.y
+      return a.x - b.x
+    })
+    
+    // Create ordered contour using nearest neighbor approach
+    const orderedContour: PolygonPoint[] = []
+    const used = new Set<string>()
+    
+    let current = boundaryPixels[0]
+    orderedContour.push(current)
+    used.add(`${current.x},${current.y}`)
+    
+    while (orderedContour.length < boundaryPixels.length) {
+      let nearestDist = Infinity
+      let nearest: PolygonPoint | null = null
+      
+      for (const pixel of boundaryPixels) {
+        const key = `${pixel.x},${pixel.y}`
+        if (used.has(key)) continue
+        
+        const dist = Math.sqrt((pixel.x - current.x) ** 2 + (pixel.y - current.y) ** 2)
+        if (dist < nearestDist && dist <= 2) { // Only connect nearby pixels
+          nearestDist = dist
+          nearest = pixel
+        }
+      }
+      
+      if (nearest) {
+        orderedContour.push(nearest)
+        used.add(`${nearest.x},${nearest.y}`)
+        current = nearest
+      } else {
+        break // No more connected pixels
+      }
+    }
+    
+    console.log('Created ordered contour with', orderedContour.length, 'points')
+    
+    return orderedContour
+  }
+
+  // Simplify contour using Douglas-Peucker algorithm
+  const simplifyContour = (points: PolygonPoint[], tolerance: number): PolygonPoint[] => {
+    if (points.length <= 2) return points
+    
+    const douglasPeucker = (points: PolygonPoint[], epsilon: number): PolygonPoint[] => {
+      if (points.length <= 2) return points
+      
+      // Find the point with maximum distance from line between first and last points
+      let maxDistance = 0
+      let maxIndex = 0
+      const start = points[0]
+      const end = points[points.length - 1]
+      
+      for (let i = 1; i < points.length - 1; i++) {
+        const distance = pointToLineDistance(points[i], start, end)
+        if (distance > maxDistance) {
+          maxDistance = distance
+          maxIndex = i
+        }
+      }
+      
+      // If max distance is greater than epsilon, recursively simplify
+      if (maxDistance > epsilon) {
+        const left = douglasPeucker(points.slice(0, maxIndex + 1), epsilon)
+        const right = douglasPeucker(points.slice(maxIndex), epsilon)
+        
+        // Combine results (remove duplicate point at maxIndex)
+        return [...left.slice(0, -1), ...right]
+      } else {
+        // Return simplified line
+        return [start, end]
+      }
+    }
+    
+    return douglasPeucker(points, tolerance)
+  }
+
+  // Calculate perpendicular distance from point to line
+  const pointToLineDistance = (point: PolygonPoint, lineStart: PolygonPoint, lineEnd: PolygonPoint): number => {
+    const A = lineEnd.y - lineStart.y
+    const B = lineStart.x - lineEnd.x  
+    const C = lineEnd.x * lineStart.y - lineStart.x * lineEnd.y
+    
+    return Math.abs(A * point.x + B * point.y + C) / Math.sqrt(A * A + B * B)
   }
 
   const handlePolygonChange = (points: any[]) => {
@@ -417,19 +654,42 @@ export const AnnotationPage = () => {
                     onChange={(e) => setSelectedCategory(e.target.value)}
                   >
                     {categories.map((category) => (
-                      <MenuItem key={category} value={category}>
-                        {category}
+                      <MenuItem key={category.id} value={category.name}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <Box 
+                            sx={{ 
+                              width: 12, 
+                              height: 12, 
+                              borderRadius: '50%', 
+                              backgroundColor: category.color 
+                            }} 
+                          />
+                          {category.name}
+                        </Box>
                       </MenuItem>
                     ))}
                   </Select>
                 </FormControl>
               </Grid>
               
-              <Grid item xs={12} sm={6} md={4}>
+              <Grid item xs={12} sm={6} md={2}>
                 <Box sx={{ display: 'flex', gap: 1 }}>
                   <Chip label={`Points: ${selectedPoints.length}`} size="small" />
                   <Chip label={`Boxes: ${selectedBoxes.length}`} size="small" />
                 </Box>
+              </Grid>
+
+              <Grid item xs={12} sm={6} md={2}>
+                <Button
+                  variant="outlined"
+                  color="secondary"
+                  size="small"
+                  startIcon={<FileDownload />}
+                  onClick={() => setExportDialogOpen(true)}
+                  fullWidth
+                >
+                  Export
+                </Button>
               </Grid>
               
               <Grid item xs={12} md={5}>
@@ -490,6 +750,15 @@ export const AnnotationPage = () => {
         </Grid>
 
       </Grid>
+
+      {/* Export Dialog */}
+      <ExportDialog
+        open={exportDialogOpen}
+        onClose={() => setExportDialogOpen(false)}
+        projectId={projectId ? parseInt(projectId) : 0}
+        videoId={videoId ? parseInt(videoId) : undefined}
+        projectName={currentVideo?.filename ? `Video_${currentVideo.filename}` : 'project'}
+      />
     </Container>
   )
 }

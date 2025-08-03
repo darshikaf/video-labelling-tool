@@ -19,12 +19,20 @@ class CRUDAnnotation(CRUDBase[Annotation, AnnotationCreate, AnnotationBase]):
         )
 
     def create_with_frame(
-        self, db: Session, *, obj_in: AnnotationCreate, frame_id: int, mask_data: bytes
+        self, db: Session, *, obj_in: AnnotationCreate, frame_id: int, 
+        mask_storage_key: str, mask_width: int = None, mask_height: int = None
     ) -> Annotation:
         obj_in_data = obj_in.dict()
-        # Remove mask_data from obj_in_data since we're passing it separately
+        # Remove mask_data from obj_in_data since it's stored in object storage
         obj_in_data.pop('mask_data', None)
-        db_obj = self.model(**obj_in_data, frame_id=frame_id, mask_data=mask_data)
+        
+        db_obj = self.model(
+            **obj_in_data, 
+            frame_id=frame_id,
+            mask_storage_key=mask_storage_key,
+            mask_width=mask_width,
+            mask_height=mask_height
+        )
         db.add(db_obj)
         db.commit()
         db.refresh(db_obj)
