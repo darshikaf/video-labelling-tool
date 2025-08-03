@@ -171,6 +171,108 @@ class StorageService:
             Presigned URL for accessing the frame image
         """
         return self.get_mask_url(object_key, expires_in_hours)
+    
+    def store_annotation(self, project_id: int, video_id: int, frame_number: int, 
+                        annotation_id: int, annotation_content: str, format_type: str) -> str:
+        """
+        Store annotation file in object storage
+        
+        Args:
+            project_id: ID of the project
+            video_id: ID of the video
+            frame_number: Frame number
+            annotation_id: ID of the annotation
+            annotation_content: Formatted annotation content (YOLO, COCO, etc.)
+            format_type: Annotation format type (YOLO, COCO, PASCAL_VOC)
+            
+        Returns:
+            Object key/path in storage
+        """
+        try:
+            # Get file extension based on format
+            extensions = {
+                'YOLO': '.txt',
+                'COCO': '.json',
+                'PASCAL_VOC': '.xml'
+            }
+            ext = extensions.get(format_type.upper(), '.txt')
+            
+            # Create object key
+            object_key = f"projects/{project_id}/videos/{video_id}/frames/{frame_number}/annotations/{annotation_id}/annotation{ext}"
+            
+            # Convert content to bytes
+            content_bytes = annotation_content.encode('utf-8')
+            
+            # Determine content type
+            content_types = {
+                '.txt': 'text/plain',
+                '.json': 'application/json',
+                '.xml': 'application/xml'
+            }
+            content_type = content_types.get(ext, 'text/plain')
+            
+            # Upload to storage
+            self.client.put_object(
+                bucket_name=self.bucket_name,
+                object_name=object_key,
+                data=io.BytesIO(content_bytes),
+                length=len(content_bytes),
+                content_type=content_type
+            )
+            
+            return object_key
+            
+        except Exception as e:
+            print(f"Error storing annotation: {e}")
+            raise
+    
+    def store_mask_and_annotation(self, project_id: int, video_id: int, frame_number: int,
+                                 annotation_id: int, mask_data: str, annotation_content: str, 
+                                 format_type: str) -> dict:
+        """
+        Store both mask and annotation files in object storage
+        
+        Args:
+            project_id: ID of the project
+            video_id: ID of the video
+            frame_number: Frame number
+            annotation_id: ID of the annotation
+            mask_data: Base64 encoded mask image data
+            annotation_content: Formatted annotation content
+            format_type: Annotation format type
+            
+        Returns:
+            Dict with both storage keys
+        """
+        try:
+            # Store mask
+            mask_key = self.store_mask(project_id, video_id, frame_number, annotation_id, mask_data)
+            
+            # Store annotation
+            annotation_key = self.store_annotation(project_id, video_id, frame_number, 
+                                                 annotation_id, annotation_content, format_type)
+            
+            return {
+                'mask_storage_key': mask_key,
+                'annotation_storage_key': annotation_key
+            }
+            
+        except Exception as e:
+            print(f"Error storing mask and annotation: {e}")
+            raise
+    
+    def get_annotation_url(self, object_key: str, expires_in_hours: int = 24) -> str:
+        """
+        Get presigned URL for annotation file retrieval
+        
+        Args:
+            object_key: Object key/path in storage
+            expires_in_hours: URL expiration time in hours
+            
+        Returns:
+            Presigned URL for accessing the annotation file
+        """
+        return self.get_mask_url(object_key, expires_in_hours)
 
 # Global instance
 storage_service = StorageService()

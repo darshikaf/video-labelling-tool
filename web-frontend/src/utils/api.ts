@@ -42,8 +42,8 @@ export const projectAPI = {
     return response.data
   },
 
-  createProject: async (name: string, description?: string, categories?: string[]): Promise<Project> => {
-    const response = await apiClient.post('/projects/', { name, description, categories })
+  createProject: async (name: string, description?: string, categories?: string[], annotation_format?: string): Promise<Project> => {
+    const response = await apiClient.post('/projects/', { name, description, categories, annotation_format })
     return response.data
   },
 

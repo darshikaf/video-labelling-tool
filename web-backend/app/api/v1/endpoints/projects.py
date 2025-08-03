@@ -67,11 +67,9 @@ def create_project(
         # Extract categories before creating project (since it's not a Project model field)
         categories = project_in.categories
         
-        # Create a clean project object without categories field
-        project_data = schemas.ProjectBase(
-            name=project_in.name,
-            description=project_in.description
-        )
+        # Create project using the full schema - CRUD will filter out invalid fields
+        # This approach lets the CRUD handle backward compatibility
+        project_data = project_in
         
         # Create project
         project = crud.project.create_with_owner(

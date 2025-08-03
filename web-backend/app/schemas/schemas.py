@@ -21,6 +21,7 @@ class User(UserBase):
 class ProjectBase(BaseModel):
     name: str
     description: Optional[str] = None
+    annotation_format: str = 'YOLO'  # YOLO, COCO, PASCAL_VOC
 
 
 class ProjectCreate(ProjectBase):
@@ -119,6 +120,7 @@ class Annotation(AnnotationBase):
     frame_id: int
     category_id: int
     mask_storage_key: str  # Object storage key for mask
+    annotation_storage_key: Optional[str] = None  # Object storage key for annotation file
     is_reviewed: bool
     created_at: datetime
     updated_at: Optional[datetime]

@@ -24,6 +24,7 @@ class Project(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
     description = Column(Text, nullable=True)
+    annotation_format = Column(String, nullable=False, default='YOLO')  # YOLO, COCO, PASCAL_VOC
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -87,6 +88,7 @@ class Annotation(Base):
     frame_id = Column(Integer, ForeignKey("frames.id"), nullable=False)
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=False)
     mask_storage_key = Column(String, nullable=False)  # Object storage key for mask
+    annotation_storage_key = Column(String, nullable=True)  # Object storage key for annotation file
     sam_points = Column(Text, nullable=True)  # JSON string of SAM prompt points
     sam_boxes = Column(Text, nullable=True)  # JSON string of SAM prompt boxes
     confidence = Column(Float, nullable=True)

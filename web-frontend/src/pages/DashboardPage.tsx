@@ -40,6 +40,7 @@ export const DashboardPage = () => {
   // Category management state
   const [selectedCategories, setSelectedCategories] = useState<string[]>(['Person'])
   const [customCategory, setCustomCategory] = useState('')
+  const [annotationFormat, setAnnotationFormat] = useState<string>('YOLO')
   
   // Predefined categories for common medical/general use cases
   const predefinedCategories = [
@@ -78,6 +79,7 @@ export const DashboardPage = () => {
     setNewProjectDescription('')
     setSelectedCategories(['Person'])
     setCustomCategory('')
+    setAnnotationFormat('YOLO')
   }
 
   const handleCreateProject = async () => {
@@ -91,7 +93,8 @@ export const DashboardPage = () => {
       const result = await dispatch(createProject({
         name: newProjectName,
         description: newProjectDescription,
-        categories: selectedCategories
+        categories: selectedCategories,
+        annotation_format: annotationFormat
       }))
       resetDialog()
       
@@ -197,9 +200,53 @@ export const DashboardPage = () => {
               />
             </Grid>
 
-            {/* Category Selection */}
+            {/* Annotation Format Selection */}
             <Grid item xs={12}>
               <Divider sx={{ my: 2 }} />
+              <Typography variant="h6" gutterBottom>
+                Annotation Format
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Choose the annotation format for your training data. This will determine how annotations are stored and exported.
+              </Typography>
+              
+              <FormControl fullWidth sx={{ mb: 2 }}>
+                <InputLabel>Annotation Format</InputLabel>
+                <Select
+                  value={annotationFormat}
+                  onChange={(e) => setAnnotationFormat(e.target.value)}
+                  label="Annotation Format"
+                >
+                  <MenuItem value="YOLO">
+                    <Box>
+                      <Typography variant="body1" fontWeight="medium">YOLO</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Text files with normalized bounding boxes (center_x, center_y, width, height)
+                      </Typography>
+                    </Box>
+                  </MenuItem>
+                  <MenuItem value="COCO">
+                    <Box>
+                      <Typography variant="body1" fontWeight="medium">COCO</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        JSON format with segmentation polygons and detailed metadata
+                      </Typography>
+                    </Box>
+                  </MenuItem>
+                  <MenuItem value="PASCAL_VOC">
+                    <Box>
+                      <Typography variant="body1" fontWeight="medium">Pascal VOC</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        XML files with bounding box coordinates and object information
+                      </Typography>
+                    </Box>
+                  </MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+
+            {/* Category Selection */}
+            <Grid item xs={12}>
               <Typography variant="h6" gutterBottom>
                 Annotation Categories
               </Typography>
