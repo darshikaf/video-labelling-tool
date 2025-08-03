@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  frontend:
+    build:
+      context: ./web-frontend
+      dockerfile: Dockerfile.prod
+    ports:
+      - "80:80"
+    environment:
+      - REACT_APP_API_URL=http://backend:8000
+      - REACT_APP_SAM_SERVICE_URL=http://sam-service:8001
+    depends_on:
+      - backend
+
+  backend:
+    build:
+      context: ./web-backend
+      dockerfile: Dockerfile.prod
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - SAM_SERVICE_URL=http://sam-service:8001
+    depends_on:
+      - sam-service
+
+  sam-service:
+    build:
+      context: ./sam-service
+      dockerfile: Dockerfile.prod
+    ports:
+      - "8001:8001"
+    environment:
+      - REDIS_URL=${REDIS_URL}
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/ssl
+    depends_on:
+      - frontend
+      - backend
