@@ -172,3 +172,11 @@ artifacts/
 
 /test
 /input
+
+# Claude settings
+.claude
+CLAUDE.md
+
+#video artifacts
+*.mov
+*.mp4
