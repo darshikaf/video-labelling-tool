@@ -1,0 +1,764 @@
+import React, { useEffect, useState } from 'react'
+import { useParams } from 'react-router-dom'
+import { useDispatch, useSelector } from 'react-redux'
+import { 
+  Container, 
+  Grid, 
+  Paper, 
+  Typography, 
+  Box,
+  Button,
+  Chip,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  CircularProgress
+} from '@mui/material'
+import { RootState } from '@/store/store'
+import { fetchVideo, fetchFrame } from '@/store/slices/videoSlice'
+import { setCurrentFrame } from '@/store/slices/videoSlice'
+import { VideoPlayer } from '@/components/annotation/VideoPlayer'
+import { AnnotationCanvas } from '@/components/annotation/AnnotationCanvas'
+import { setPromptType, addPoint, addBox, setAwaitingDecision, runSAMPrediction, resetAnnotationState, clearPoints, clearBoxes, setCurrentMask } from '@/store/slices/annotationSlice'
+import { annotationAPI, projectAPI } from '@/utils/api'
+import ExportDialog from '@/components/export/ExportDialog'
+import { FileDownload } from '@mui/icons-material'
+
+export const AnnotationPage = () => {
+  const { projectId, videoId } = useParams<{ projectId: string; videoId: string }>()
+  const dispatch = useDispatch()
+  
+  const { currentVideo, currentFrame, frameImageUrl, loading: videoLoading } = useSelector(
+    (state: RootState) => state.video
+  )
+  const { 
+    promptType, 
+    selectedPoints, 
+    selectedBoxes, 
+    currentMask, 
+    awaitingDecision,
+    loading: annotationLoading 
+  } = useSelector((state: RootState) => state.annotation)
+
+  const [selectedCategory, setSelectedCategory] = useState('')
+  const [categories, setCategories] = useState<Array<{id: number, name: string, color: string}>>([])
+  const [samLoading, setSamLoading] = useState(false)
+  const [editingMode, setEditingMode] = useState<'sam' | 'polygon'>('sam')
+  const [polygonPoints, setPolygonPoints] = useState<any[]>([])
+  const [exportDialogOpen, setExportDialogOpen] = useState(false)
+
+  useEffect(() => {
+    if (videoId) {
+      dispatch(fetchVideo(parseInt(videoId)))
+    }
+  }, [dispatch, videoId])
+
+  useEffect(() => {
+    if (currentVideo && videoId) {
+      // Load first frame
+      dispatch(fetchFrame({ videoId: parseInt(videoId), frameNumber: currentFrame }))
+    }
+  }, [dispatch, currentVideo, videoId, currentFrame])
+
+  // Load project categories
+  useEffect(() => {
+    const loadCategories = async () => {
+      if (projectId) {
+        try {
+          const projectCategories = await projectAPI.getProjectCategories(parseInt(projectId))
+          setCategories(projectCategories)
+          // Set default category to first available category
+          if (projectCategories.length > 0 && !selectedCategory) {
+            setSelectedCategory(projectCategories[0].name)
+          }
+        } catch (error) {
+          console.error('Failed to load project categories:', error)
+          // Fallback to default categories
+          const defaultCategories = [
+            { id: 1, name: 'Person', color: '#FF6B6B' },
+            { id: 2, name: 'Object', color: '#4ECDC4' }
+          ]
+          setCategories(defaultCategories)
+          setSelectedCategory('Person')
+        }
+      }
+    }
+    loadCategories()
+  }, [projectId, selectedCategory])
+
+  const handleFrameChange = (frameNumber: number) => {
+    if (videoId && frameNumber !== currentFrame) {
+      // Clear annotation state when changing frames
+      dispatch(resetAnnotationState())
+      dispatch(setCurrentFrame(frameNumber))
+      dispatch(fetchFrame({ videoId: parseInt(videoId), frameNumber }))
+    }
+  }
+
+  const handlePointClick = async (x: number, y: number, isPositive: boolean) => {
+    console.log('DEBUG: AnnotationPage handlePointClick called with:', { x, y, isPositive })
+    const newPoint = { x, y, is_positive: isPositive }
+    console.log('DEBUG: Adding point to Redux state:', newPoint)
+    dispatch(addPoint(newPoint))
+    console.log('DEBUG: Running SAM prediction with updated points')
+    await runPrediction([...selectedPoints, newPoint], selectedBoxes)
+  }
+
+  const handleBoxSelect = async (x1: number, y1: number, x2: number, y2: number) => {
+    console.log('DEBUG: AnnotationPage handleBoxSelect called with:', { x1, y1, x2, y2 })
+    const box = { x1, y1, x2, y2 }
+    console.log('DEBUG: Adding box to Redux state:', box)
+    dispatch(addBox(box))
+    console.log('DEBUG: Running SAM prediction with updated boxes')
+    await runPrediction(selectedPoints, [...selectedBoxes, box])
+  }
+
+  const runPrediction = async (points: any[], boxes: any[]) => {
+    console.log('DEBUG: runPrediction called with:', { points, boxes, frameImageUrl, promptType })
+    
+    if (!frameImageUrl) {
+      console.log('DEBUG: No frameImageUrl, returning early')
+      return
+    }
+
+    try {
+      console.log('DEBUG: Setting SAM loading to true')
+      setSamLoading(true)
+      
+      // Convert image to base64
+      const canvas = document.createElement('canvas')
+      const ctx = canvas.getContext('2d')
+      const img = new Image()
+      
+      img.onload = async () => {
+        console.log('DEBUG: Image loaded, converting to base64')
+        canvas.width = img.width
+        canvas.height = img.height
+        ctx?.drawImage(img, 0, 0)
+        
+        const imageData = canvas.toDataURL('image/jpeg').split(',')[1]
+        console.log('DEBUG: Image converted to base64, length:', imageData.length)
+        
+        const request = {
+          image_data: imageData,
+          prompt_type: promptType,
+          points: promptType === 'point' ? points : undefined,
+          boxes: promptType === 'box' ? boxes : undefined
+        }
+        console.log('DEBUG: Dispatching SAM prediction with request:', request)
+
+        await dispatch(runSAMPrediction(request))
+        console.log('DEBUG: SAM prediction dispatch completed')
+        setSamLoading(false)
+      }
+      
+      img.onerror = (error) => {
+        console.error('DEBUG: Image failed to load:', error)
+        setSamLoading(false)
+      }
+      
+      console.log('DEBUG: Setting image src:', frameImageUrl)
+      img.src = frameImageUrl
+    } catch (error) {
+      console.error('DEBUG: SAM prediction failed:', error)
+      setSamLoading(false)
+    }
+  }
+
+  const handleSaveAnnotation = async () => {
+    if (!currentMask || !videoId || !currentVideo || !selectedCategory) {
+      console.error('Missing required data for saving annotation')
+      alert('Please ensure a category is selected and a mask is generated')
+      return
+    }
+
+    try {
+      // Find the category object to get additional metadata
+      const categoryObj = categories.find(cat => cat.name === selectedCategory)
+      
+      console.log('Saving annotation with comprehensive metadata:', {
+        projectId,
+        videoId,
+        videoName: currentVideo.filename,
+        frameNumber: currentFrame,
+        category: selectedCategory,
+        categoryId: categoryObj?.id,
+        categoryColor: categoryObj?.color,
+        maskLength: currentMask.length,
+        samPoints: selectedPoints,
+        samBoxes: selectedBoxes,
+        videoWidth: currentVideo.width,
+        videoHeight: currentVideo.height,
+        videoFps: currentVideo.fps,
+        editingMode,
+        timestamp: new Date().toISOString()
+      })
+
+      const savedAnnotation = await annotationAPI.createAnnotation(
+        parseInt(videoId),
+        currentFrame,
+        selectedCategory,
+        currentMask,
+        selectedPoints,
+        selectedBoxes,
+        0.85 // Default confidence - can be enhanced with actual SAM confidence
+      )
+
+      console.log('Annotation saved successfully with full model training metadata', {
+        annotationId: savedAnnotation.id,
+        maskStorageKey: savedAnnotation.mask_storage_key || 'Not available',
+        objectStorageEnabled: true
+      })
+      dispatch(setAwaitingDecision(false))
+      dispatch(resetAnnotationState())
+      setEditingMode('sam') // Reset to SAM mode after saving
+      
+    } catch (error) {
+      console.error('Failed to save annotation:', error)
+      alert('Failed to save annotation. Please try again.')
+    }
+  }
+
+  const handleCancelAnnotation = () => {
+    dispatch(setAwaitingDecision(false))
+    dispatch(resetAnnotationState())
+    setEditingMode('sam')
+  }
+
+
+
+  const handleEnterPolygonMode = () => {
+    console.log('=== EDIT POLYGON BUTTON CLICKED ===')
+    console.log('Current mask exists:', !!currentMask)
+    console.log('Current mask length:', currentMask?.length)
+    console.log('Current editing mode:', editingMode)
+    
+    if (currentMask) {
+      console.log('Switching to polygon mode and converting mask...')
+      setEditingMode('polygon')
+      // Convert current mask to polygon points
+      convertMaskToPolygon(currentMask)
+    } else {
+      console.log('No mask available for polygon editing')
+    }
+  }
+
+  // Convert mask to polygon points - simplified for consistent 640x480 handling
+  const convertMaskToPolygon = (maskData: string) => {
+    console.log('=== MASK TO POLYGON CONVERSION (640x480 STANDARD) ===')
+    console.log('Input mask data length:', maskData.length)
+    
+    const img = new Image()
+    img.onload = () => {
+      console.log('Loaded mask image:', { width: img.width, height: img.height })
+      
+      // ENFORCE: All masks should be 640x480 from SAM backend
+      if (img.width !== 640 || img.height !== 480) {
+        console.error(`Invalid mask dimensions: ${img.width}x${img.height}, expected 640x480`)
+        console.error('This indicates a backend consistency issue. Proceeding with conversion but results may be misaligned.')
+      }
+      
+      // Process mask directly since it should already be 640x480
+      const canvas = document.createElement('canvas')
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return
+
+      canvas.width = 640
+      canvas.height = 480
+      ctx.drawImage(img, 0, 0, 640, 480) // Force to 640x480 if needed
+
+      const imageData = ctx.getImageData(0, 0, 640, 480)
+      const data = imageData.data
+
+      console.log('Processing mask in standard 640x480 space:', { 
+        maskDimensions: { width: img.width, height: img.height },
+        processingDimensions: { width: 640, height: 480 },
+        dataLength: data.length 
+      })
+
+      // Find bounding box and pixels
+      let minX = 640, maxX = 0, minY = 480, maxY = 0
+      let maskPixelCount = 0
+      
+      for (let y = 0; y < 480; y++) {
+        for (let x = 0; x < 640; x++) {
+          const idx = (y * 640 + x) * 4
+          const value = data[idx] // R channel
+          
+          if (value > 128) {
+            maskPixelCount++
+            minX = Math.min(minX, x)
+            maxX = Math.max(maxX, x)
+            minY = Math.min(minY, y)
+            maxY = Math.max(maxY, y)
+          }
+        }
+      }
+
+      console.log('Mask analysis result:', {
+        maskPixelCount,
+        boundingBox: { minX, minY, maxX, maxY },
+        boundingBoxSize: { width: maxX - minX, height: maxY - minY }
+      })
+
+      if (maskPixelCount > 0) {
+        console.log('Tracing mask contour in 640x480 coordinate space')
+        
+        // Trace the contour of the mask to get actual boundary points
+        const contourPoints = traceMaskContour(imageData, 640, 480)
+        
+        if (contourPoints.length > 0) {
+          console.log('Traced contour with', contourPoints.length, 'points')
+          
+          // Simplify the contour to reduce number of points for better editing
+          const simplifiedPoints = simplifyContour(contourPoints, 1.5)
+          
+          console.log('Simplified contour to', simplifiedPoints.length, 'points')
+          
+          console.log('Created polygon points from mask contour:', {
+            coordinateSpace: '640x480 (SAM standard)',
+            contourPoints: contourPoints.length,
+            simplifiedPoints: simplifiedPoints.length,
+            firstFewPoints: simplifiedPoints.slice(0, 5),
+            boundingBox: {
+              minX: Math.min(...simplifiedPoints.map(p => p.x)),
+              minY: Math.min(...simplifiedPoints.map(p => p.y)), 
+              maxX: Math.max(...simplifiedPoints.map(p => p.x)),
+              maxY: Math.max(...simplifiedPoints.map(p => p.y))
+            }
+          })
+          
+          setPolygonPoints(simplifiedPoints)
+        } else {
+          console.log('Contour tracing failed, falling back to bounding box')
+          // Fallback to bounding box
+          const points = [
+            { x: minX, y: minY },
+            { x: maxX, y: minY }, 
+            { x: maxX, y: maxY },
+            { x: minX, y: maxY }
+          ]
+          setPolygonPoints(points)
+        }
+      } else {
+        console.log('WARNING: No mask pixels found!')
+      }
+    }
+    
+    img.onerror = (error) => {
+      console.error('Failed to load mask image:', error)
+    }
+    
+    // Handle base64 data URL format
+    if (maskData.startsWith('data:image')) {
+      img.src = maskData
+    } else {
+      img.src = `data:image/png;base64,${maskData}`
+    }
+  }
+
+  // Improved contour tracing using edge detection approach
+  const traceMaskContour = (imageData: ImageData, width: number, height: number): PolygonPoint[] => {
+    const data = imageData.data
+    const contour: PolygonPoint[] = []
+    
+    console.log('Starting contour tracing on', width, 'x', height, 'image')
+    
+    // Create a binary mask for easier processing
+    const binaryMask = new Array(width * height).fill(0)
+    let maskPixels = 0
+    
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = (y * width + x) * 4
+        if (data[idx] > 128) {
+          binaryMask[y * width + x] = 1
+          maskPixels++
+        }
+      }
+    }
+    
+    console.log('Found', maskPixels, 'mask pixels')
+    
+    if (maskPixels === 0) return []
+    
+    // Find the topmost, leftmost mask pixel for a consistent starting point
+    let startX = -1, startY = -1
+    for (let y = 0; y < height && startX === -1; y++) {
+      for (let x = 0; x < width && startX === -1; x++) {
+        if (binaryMask[y * width + x] === 1) {
+          // Check if this is a boundary pixel (has at least one non-mask neighbor)
+          let isBoundary = false
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              if (dx === 0 && dy === 0) continue
+              const nx = x + dx
+              const ny = y + dy
+              if (nx < 0 || nx >= width || ny < 0 || ny >= height || binaryMask[ny * width + nx] === 0) {
+                isBoundary = true
+                break
+              }
+            }
+            if (isBoundary) break
+          }
+          
+          if (isBoundary) {
+            startX = x
+            startY = y
+          }
+        }
+      }
+    }
+    
+    if (startX === -1) return []
+    
+    console.log('Starting contour trace from:', startX, startY)
+    
+    // Use a more accurate boundary following algorithm
+    // Find boundary pixels using edge detection
+    const boundaryPixels: PolygonPoint[] = []
+    
+    for (let y = 1; y < height - 1; y++) {
+      for (let x = 1; x < width - 1; x++) {
+        if (binaryMask[y * width + x] === 1) {
+          // Check if this pixel is on the boundary (has non-mask neighbors)
+          let isBoundary = false
+          const neighbors = [
+            [-1, -1], [-1, 0], [-1, 1],
+            [0, -1],           [0, 1],
+            [1, -1],  [1, 0],  [1, 1]
+          ]
+          
+          for (const [dx, dy] of neighbors) {
+            const nx = x + dx
+            const ny = y + dy
+            if (binaryMask[ny * width + nx] === 0) {
+              isBoundary = true
+              break
+            }
+          }
+          
+          if (isBoundary) {
+            // Add slight offset to center the polygon on pixel boundaries
+            // This helps with visual alignment precision
+            boundaryPixels.push({ x: x + 0.5, y: y + 0.5 })
+          }
+        }
+      }
+    }
+    
+    console.log('Found', boundaryPixels.length, 'boundary pixels')
+    
+    if (boundaryPixels.length === 0) return []
+    
+    // Sort boundary pixels to create a proper contour
+    // Start from the topmost, leftmost point
+    boundaryPixels.sort((a, b) => {
+      if (a.y !== b.y) return a.y - b.y
+      return a.x - b.x
+    })
+    
+    // Create ordered contour using nearest neighbor approach
+    const orderedContour: PolygonPoint[] = []
+    const used = new Set<string>()
+    
+    let current = boundaryPixels[0]
+    orderedContour.push(current)
+    used.add(`${current.x},${current.y}`)
+    
+    while (orderedContour.length < boundaryPixels.length) {
+      let nearestDist = Infinity
+      let nearest: PolygonPoint | null = null
+      
+      for (const pixel of boundaryPixels) {
+        const key = `${pixel.x},${pixel.y}`
+        if (used.has(key)) continue
+        
+        const dist = Math.sqrt((pixel.x - current.x) ** 2 + (pixel.y - current.y) ** 2)
+        if (dist < nearestDist && dist <= 2) { // Only connect nearby pixels
+          nearestDist = dist
+          nearest = pixel
+        }
+      }
+      
+      if (nearest) {
+        orderedContour.push(nearest)
+        used.add(`${nearest.x},${nearest.y}`)
+        current = nearest
+      } else {
+        break // No more connected pixels
+      }
+    }
+    
+    console.log('Created ordered contour with', orderedContour.length, 'points')
+    
+    return orderedContour
+  }
+
+  // Simplify contour using Douglas-Peucker algorithm
+  const simplifyContour = (points: PolygonPoint[], tolerance: number): PolygonPoint[] => {
+    if (points.length <= 2) return points
+    
+    const douglasPeucker = (points: PolygonPoint[], epsilon: number): PolygonPoint[] => {
+      if (points.length <= 2) return points
+      
+      // Find the point with maximum distance from line between first and last points
+      let maxDistance = 0
+      let maxIndex = 0
+      const start = points[0]
+      const end = points[points.length - 1]
+      
+      for (let i = 1; i < points.length - 1; i++) {
+        const distance = pointToLineDistance(points[i], start, end)
+        if (distance > maxDistance) {
+          maxDistance = distance
+          maxIndex = i
+        }
+      }
+      
+      // If max distance is greater than epsilon, recursively simplify
+      if (maxDistance > epsilon) {
+        const left = douglasPeucker(points.slice(0, maxIndex + 1), epsilon)
+        const right = douglasPeucker(points.slice(maxIndex), epsilon)
+        
+        // Combine results (remove duplicate point at maxIndex)
+        return [...left.slice(0, -1), ...right]
+      } else {
+        // Return simplified line
+        return [start, end]
+      }
+    }
+    
+    return douglasPeucker(points, tolerance)
+  }
+
+  // Calculate perpendicular distance from point to line
+  const pointToLineDistance = (point: PolygonPoint, lineStart: PolygonPoint, lineEnd: PolygonPoint): number => {
+    const A = lineEnd.y - lineStart.y
+    const B = lineStart.x - lineEnd.x  
+    const C = lineEnd.x * lineStart.y - lineStart.x * lineEnd.y
+    
+    return Math.abs(A * point.x + B * point.y + C) / Math.sqrt(A * A + B * B)
+  }
+
+  const handlePolygonChange = (points: any[]) => {
+    setPolygonPoints(points)
+  }
+
+  const handleMaskGenerated = (maskData: string) => {
+    // Update the current mask with the new polygon-generated mask
+    dispatch(setCurrentMask(maskData))
+    dispatch(setAwaitingDecision(true))
+    console.log('New mask generated from polygon editing')
+  }
+
+
+  if (videoLoading) {
+    return (
+      <Container sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
+        <CircularProgress />
+      </Container>
+    )
+  }
+
+  if (!currentVideo) {
+    return (
+      <Container sx={{ mt: 4 }}>
+        <Typography variant="h6" color="error">
+          Video not found
+        </Typography>
+      </Container>
+    )
+  }
+
+  return (
+    <Container maxWidth="xl" sx={{ mt: 2 }}>
+      <Typography variant="h4" gutterBottom>
+        Annotating: {currentVideo.filename}
+      </Typography>
+      
+      <Grid container spacing={3}>
+        {/* Left Panel - Video Player */}
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 2 }}>
+            <Typography variant="h6" gutterBottom>
+              Video Player
+            </Typography>
+            <VideoPlayer
+              video={currentVideo}
+              currentFrame={currentFrame}
+              onFrameChange={handleFrameChange}
+              frameImageUrl={frameImageUrl}
+            />
+          </Paper>
+        </Grid>
+
+        {/* Right Panel - Annotation Canvas or Polygon Editor */}
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 2 }}>
+            <Typography variant="h6" gutterBottom>
+              {editingMode === 'sam' ? 'Annotation Canvas' : 'Polygon Editor'}
+            </Typography>
+            
+            {editingMode === 'polygon' && (
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                Drag nodes • Click edges to add nodes • Shift+click nodes to delete
+              </Typography>
+            )}
+            
+            <AnnotationCanvas
+              frameImageUrl={frameImageUrl}
+              width={800}
+              height={600}
+              maxCanvasWidth={800}
+              maxCanvasHeight={600}
+              onPointClick={handlePointClick}
+              onBoxSelect={handleBoxSelect}
+              promptType={promptType}
+              onPromptTypeChange={(type) => dispatch(setPromptType(type))}
+              currentMask={currentMask}
+              selectedPoints={selectedPoints}
+              selectedBoxes={selectedBoxes}
+              isPolygonMode={editingMode === 'polygon'}
+              polygonPoints={polygonPoints}
+              onPolygonChange={handlePolygonChange}
+              onMaskGenerated={handleMaskGenerated}
+            />
+            
+            {samLoading && editingMode === 'sam' && (
+              <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
+                <CircularProgress size={24} />
+                <Typography variant="body2" sx={{ ml: 1 }}>
+                  Running SAM prediction...
+                </Typography>
+              </Box>
+            )}
+          </Paper>
+        </Grid>
+
+        {/* Bottom Panel - Annotation Controls */}
+        <Grid item xs={12}>
+          <Paper sx={{ p: 2 }}>
+            <Typography variant="h6" gutterBottom>
+              Annotation Controls
+            </Typography>
+            
+            <Grid container spacing={2} alignItems="center">
+              <Grid item xs={12} sm={6} md={3}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Category</InputLabel>
+                  <Select
+                    value={selectedCategory}
+                    label="Category"
+                    onChange={(e) => setSelectedCategory(e.target.value)}
+                  >
+                    {categories.map((category) => (
+                      <MenuItem key={category.id} value={category.name}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <Box 
+                            sx={{ 
+                              width: 12, 
+                              height: 12, 
+                              borderRadius: '50%', 
+                              backgroundColor: category.color 
+                            }} 
+                          />
+                          {category.name}
+                        </Box>
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              
+              <Grid item xs={12} sm={6} md={2}>
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  <Chip label={`Points: ${selectedPoints.length}`} size="small" />
+                  <Chip label={`Boxes: ${selectedBoxes.length}`} size="small" />
+                </Box>
+              </Grid>
+
+              <Grid item xs={12} sm={6} md={2}>
+                <Button
+                  variant="outlined"
+                  color="secondary"
+                  size="small"
+                  startIcon={<FileDownload />}
+                  onClick={() => setExportDialogOpen(true)}
+                  fullWidth
+                >
+                  Export
+                </Button>
+              </Grid>
+              
+              <Grid item xs={12} md={5}>
+                <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                  {awaitingDecision ? (
+                    <>
+                      <Button 
+                        variant="contained" 
+                        color="primary" 
+                        onClick={handleSaveAnnotation}
+                      >
+                        Save Annotation
+                      </Button>
+                      {editingMode === 'sam' && currentMask && (
+                        <Button 
+                          variant="outlined" 
+                          color="secondary"
+                          onClick={handleEnterPolygonMode}
+                        >
+                          Edit Polygon
+                        </Button>
+                      )}
+                      <Button 
+                        variant="outlined" 
+                        onClick={handleCancelAnnotation}
+                      >
+                        Cancel
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button 
+                        variant="outlined" 
+                        onClick={() => {
+                          // Clear current prompts and mask
+                          dispatch(clearPoints())
+                          dispatch(clearBoxes())
+                          dispatch(resetAnnotationState())
+                          setEditingMode('sam')
+                        }}
+                      >
+                        Clear Prompts
+                      </Button>
+                      {editingMode === 'polygon' && (
+                        <Button 
+                          variant="outlined" 
+                          onClick={() => setEditingMode('sam')}
+                        >
+                          Back to SAM
+                        </Button>
+                      )}
+                    </>
+                  )}
+                </Box>
+              </Grid>
+            </Grid>
+          </Paper>
+        </Grid>
+
+      </Grid>
+
+      {/* Export Dialog */}
+      <ExportDialog
+        open={exportDialogOpen}
+        onClose={() => setExportDialogOpen(false)}
+        projectId={projectId ? parseInt(projectId) : 0}
+        videoId={videoId ? parseInt(videoId) : undefined}
+        projectName={currentVideo?.filename ? `Video_${currentVideo.filename}` : 'project'}
+      />
+    </Container>
+  )
+}
