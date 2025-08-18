@@ -1,7 +1,6 @@
 FROM python:3.11-slim
 
 # Build arguments for flexibility
-ARG EXTRA=""
 ARG TARGETPLATFORM
 ARG BUILDPLATFORM
 
@@ -32,7 +31,7 @@ COPY pyproject.toml ./
 COPY uv.lock* ./
 
 # Install Python dependencies
-RUN uv sync --frozen ${EXTRA:+--extra $EXTRA}
+RUN uv sync
 
 COPY . .
 

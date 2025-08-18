@@ -5,16 +5,12 @@ services:
     build:
       context: ./web-backend
       dockerfile: Dockerfile.dev
-      args:
-        EXTRA: cpu
     platform: linux/amd64
 
   sam-service:
     build:
       context: ./sam-service
       dockerfile: Dockerfile.dev
-      args:
-        EXTRA: cpu
     platform: linux/amd64
     ports:
       - "8001:8001"
