@@ -6,7 +6,7 @@ services:
       context: ./web-backend
       dockerfile: Dockerfile.dev
       args:
-        REQUIREMENTS_FILE: requirements-cpu.txt
+        EXTRA: cpu
     platform: linux/amd64
 
   sam-service:
@@ -14,7 +14,7 @@ services:
       context: ./sam-service
       dockerfile: Dockerfile.dev
       args:
-        REQUIREMENTS_FILE: requirements-cpu.txt
+        EXTRA: cpu
     platform: linux/amd64
     ports:
       - "8001:8001"

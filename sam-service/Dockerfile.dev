@@ -1,7 +1,7 @@
 FROM python:3.11-slim
 
 # Build arguments for flexibility
-ARG REQUIREMENTS_FILE=requirements.txt
+ARG EXTRA=""
 ARG TARGETPLATFORM
 ARG BUILDPLATFORM
 
@@ -13,7 +13,7 @@ ENV PYTHONDONTWRITEBYTECODE=1
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
-    libgl1-mesa-glx \
+    libgl1-mesa-dri \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
@@ -23,10 +23,15 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy and install Python dependencies
-COPY requirements*.txt ./
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r ${REQUIREMENTS_FILE}
+# Install uv
+RUN pip install --no-cache-dir uv
+
+# Copy pyproject.toml and uv.lock (if it exists)
+COPY pyproject.toml ./
+COPY uv.lock* ./
+
+# Install Python dependencies
+RUN uv sync --frozen ${EXTRA:+--extra $EXTRA}
 
 RUN mkdir -p /app/models
 
