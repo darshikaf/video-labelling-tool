@@ -1,0 +1,27 @@
+
+# Override for CPU-only deployment (Linux x86_64 compatibility)
+services:
+  backend:
+    build:
+      context: ./web-backend
+      dockerfile: Dockerfile.dev
+      args:
+        REQUIREMENTS_FILE: requirements-cpu.txt
+    platform: linux/amd64
+
+  sam-service:
+    build:
+      context: ./sam-service
+      dockerfile: Dockerfile.dev
+      args:
+        REQUIREMENTS_FILE: requirements-cpu.txt
+    platform: linux/amd64
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./sam-service:/app
+      - ./models:/app/models
+    environment:
+      - REDIS_URL=redis://redis:6379/1
+    depends_on:
+      - redis
