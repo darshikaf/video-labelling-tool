@@ -10,10 +10,12 @@ WORKDIR /app
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
-# Install system dependencies
+# Install system dependencies with platform-specific handling
 RUN apt-get update && apt-get install -y \
+    curl \
     libpq-dev \
     gcc \
+    g++ \
     libgl1-mesa-dev \
     libglib2.0-0 \
     libsm6 \
@@ -23,7 +25,14 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     libglu1-mesa-dev \
     freeglut3-dev \
+    libffi-dev \
+    libssl-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Print platform info for debugging
+RUN echo "Building for platform: $TARGETPLATFORM" && \
+    echo "Building on platform: $BUILDPLATFORM" && \
+    uname -a
 
 # Install uv
 RUN pip install --no-cache-dir uv

@@ -5,19 +5,32 @@ services:
     build:
       context: ./web-backend
       dockerfile: Dockerfile.dev
+      args:
+        - TARGETPLATFORM=linux/amd64
     platform: linux/amd64
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@database:5432/video_annotation
+      - REDIS_URL=redis://redis:6379/0
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      - MINIO_BUCKET=video-annotations
+      # CPU-specific optimizations
+      - OMP_NUM_THREADS=2
+      - TORCH_NUM_INTEROP_THREADS=2
+      - TORCH_NUM_THREADS=2
 
   sam-service:
     build:
       context: ./sam-service
       dockerfile: Dockerfile.dev
+      args:
+        - TARGETPLATFORM=linux/amd64
     platform: linux/amd64
-    ports:
-      - "8001:8001"
-    volumes:
-      - ./sam-service:/app
-      - ./models:/app/models
     environment:
       - REDIS_URL=redis://redis:6379/1
-    depends_on:
-      - redis
+      # CPU-specific optimizations for ML workloads
+      - OMP_NUM_THREADS=2
+      - TORCH_NUM_INTEROP_THREADS=2
+      - TORCH_NUM_THREADS=2
+      - CUDA_VISIBLE_DEVICES=""

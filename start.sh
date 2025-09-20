@@ -29,12 +29,39 @@ fi
 
 # Detect platform and start appropriate services
 PLATFORM=$(uname -m)
-if [[ "$1" == "--cpu" ]] || [[ "$PLATFORM" == "x86_64" && "$1" != "--gpu" ]]; then
-    echo "Starting with CPU-only configuration (Linux compatible)..."
-    $DOCKER_COMPOSE_CMD -f docker-compose.yml -f docker-compose.cpu.yml up --build -d
+OS=$(uname -s)
+
+# Set TARGETPLATFORM environment variable for Docker builds
+if [[ "$PLATFORM" == "arm64" ]] && [[ "$OS" == "Darwin" ]]; then
+    export TARGETPLATFORM="linux/arm64"
+    PLATFORM_NAME="Apple Silicon (ARM64)"
+elif [[ "$PLATFORM" == "x86_64" ]] && [[ "$OS" == "Linux" ]]; then
+    export TARGETPLATFORM="linux/amd64"
+    PLATFORM_NAME="Linux x86_64"
+elif [[ "$PLATFORM" == "aarch64" ]] && [[ "$OS" == "Linux" ]]; then
+    export TARGETPLATFORM="linux/arm64"
+    PLATFORM_NAME="Linux ARM64"
 else
-    echo "Starting with GPU support (Apple Silicon/CUDA)..."
-    $DOCKER_COMPOSE_CMD up --build -d
+    export TARGETPLATFORM="linux/amd64"
+    PLATFORM_NAME="Default (AMD64)"
+fi
+
+echo "Detected platform: $PLATFORM_NAME"
+echo "Using Docker target platform: $TARGETPLATFORM"
+
+# Choose configuration based on arguments and platform
+if [[ "$1" == "--cpu" ]]; then
+    echo "Starting with CPU-only configuration (forced)..."
+    $DOCKER_COMPOSE_CMD -f docker-compose.linux.yml -f docker-compose.cpu.yml up --build -d
+elif [[ "$1" == "--gpu" ]]; then
+    echo "Starting with GPU support (forced)..."
+    $DOCKER_COMPOSE_CMD -f docker-compose.linux.yml up --build -d
+elif [[ "$PLATFORM" == "x86_64" && "$OS" == "Linux" ]]; then
+    echo "Starting with CPU-only configuration (Linux x86_64 detected)..."
+    $DOCKER_COMPOSE_CMD -f docker-compose.linux.yml -f docker-compose.cpu.yml up --build -d
+else
+    echo "Starting with multi-platform configuration..."
+    $DOCKER_COMPOSE_CMD -f docker-compose.linux.yml up --build -d
 fi
 
 echo ""
@@ -47,9 +74,14 @@ echo "- Redis: localhost:6379"
 echo "- MinIO: http://localhost:9000"
 echo ""
 echo "Usage options:"
-echo "  ./start.sh          - Auto-detect platform (CPU for x86_64 Linux, GPU for others)"
-echo "  ./start.sh --cpu    - Force CPU-only mode"
-echo "  ./start.sh --gpu    - Force GPU mode"
+echo "  ./start.sh          - Auto-detect platform (CPU for Linux x86_64, multi-platform for others)"
+echo "  ./start.sh --cpu    - Force CPU-only mode (Linux compatible)"
+echo "  ./start.sh --gpu    - Force GPU mode (requires GPU support)"
 echo ""
-echo "To view logs: $DOCKER_COMPOSE_CMD logs -f [service-name]"
-echo "To stop: $DOCKER_COMPOSE_CMD down"
+echo "Platform compatibility:"
+echo "  - Linux x86_64: Uses CPU-only configuration by default"
+echo "  - Linux ARM64: Uses multi-platform configuration"
+echo "  - macOS Apple Silicon: Uses multi-platform configuration"
+echo ""
+echo "To view logs: $DOCKER_COMPOSE_CMD -f docker-compose.linux.yml logs -f [service-name]"
+echo "To stop: $DOCKER_COMPOSE_CMD -f docker-compose.linux.yml down"
