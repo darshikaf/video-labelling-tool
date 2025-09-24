@@ -169,11 +169,27 @@ def create_annotation_for_video_frame(
         
         # Convert to annotation format
         try:
-            annotation_content = annotation_format_service.convert_annotation(
-                format_data, 
-                annotation_format,
-                image_id=frame.id if annotation_format == 'COCO' else None
-            )
+            # Pass format-specific parameters
+            if annotation_format.upper() == 'COCO':
+                annotation_content = annotation_format_service.convert_annotation(
+                    format_data,
+                    annotation_format,
+                    image_id=frame.id
+                )
+            elif annotation_format.upper() == 'PASCAL_VOC':
+                # Pascal VOC needs image filename
+                image_filename = f"frame_{frame_number}.jpg"
+                annotation_content = annotation_format_service.convert_annotation(
+                    format_data,
+                    annotation_format,
+                    image_filename=image_filename
+                )
+            else:
+                # YOLO and other formats don't need extra parameters
+                annotation_content = annotation_format_service.convert_annotation(
+                    format_data,
+                    annotation_format
+                )
             
             if not annotation_content.strip():
                 print(f"Warning: Empty annotation content generated for format {annotation_format}")
