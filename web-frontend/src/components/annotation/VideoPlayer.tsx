@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react'
-import { Box, Slider, Typography, IconButton } from '@mui/material'
-import { PlayArrow, Pause, SkipPrevious, SkipNext } from '@mui/icons-material'
 import { Video } from '@/types'
+import { Pause, PlayArrow, SkipNext, SkipPrevious } from '@mui/icons-material'
+import { Box, IconButton, Slider, Typography } from '@mui/material'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 
 interface VideoPlayerProps {
   video: Video | null
@@ -19,21 +19,28 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [isPlaying, setIsPlaying] = useState(false)
   const intervalRef = useRef<NodeJS.Timeout | null>(null)
 
+  // Use ref to track current frame for interval callback (avoids stale closure)
+  const currentFrameRef = useRef(currentFrame)
+  currentFrameRef.current = currentFrame
+
   const totalFrames = video?.total_frames || 0
   const fps = video?.fps || 30
 
+  // Memoized function to advance to next frame
+  const advanceFrame = useCallback(() => {
+    const nextFrame = currentFrameRef.current + 1
+    if (nextFrame >= totalFrames) {
+      setIsPlaying(false)
+      return
+    }
+    onFrameChange(nextFrame)
+  }, [totalFrames, onFrameChange])
+
   useEffect(() => {
     if (isPlaying && video) {
-      intervalRef.current = setInterval(() => {
-        onFrameChange((prev) => {
-          const next = prev + 1
-          if (next >= totalFrames) {
-            setIsPlaying(false)
-            return prev
-          }
-          return next
-        })
-      }, 1000 / fps)
+      // Calculate interval based on FPS (minimum 33ms for ~30fps max)
+      const intervalMs = Math.max(33, 1000 / fps)
+      intervalRef.current = setInterval(advanceFrame, intervalMs)
     } else {
       if (intervalRef.current) {
         clearInterval(intervalRef.current)
@@ -46,7 +53,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         clearInterval(intervalRef.current)
       }
     }
-  }, [isPlaying, video, fps, totalFrames, onFrameChange])
+  }, [isPlaying, video, fps, advanceFrame])
 
   const handlePlayPause = () => {
     setIsPlaying(!isPlaying)
@@ -129,7 +136,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         <IconButton onClick={handleNextFrame} disabled={currentFrame >= totalFrames - 1}>
           <SkipNext />
         </IconButton>
-        
+
         <Typography variant="body2" sx={{ minWidth: 80 }}>
           {formatTime(currentFrame)}
         </Typography>

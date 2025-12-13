@@ -1,20 +1,63 @@
-import axios from 'axios'
-import { User, Project, Video, Annotation, SAMPredictionRequest, SAMPredictionResponse } from '@/types'
+import { Annotation, Project, SAMPredictionRequest, SAMPredictionResponse, User, Video } from '@/types'
+import axios, { AxiosError, AxiosResponse, InternalAxiosRequestConfig } from 'axios'
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-const SAM_SERVICE_URL = import.meta.env.VITE_SAM_SERVICE_URL || 'http://localhost:8001'
-
+// Use relative URLs so Vite proxy handles routing to the backend
+// In Docker: Vite proxies /api -> http://backend:8000
+// In production: nginx/reverse proxy handles this
 const apiClient = axios.create({
-  baseURL: `${API_BASE_URL}/api/v1`,
+  baseURL: '/api/v1',
   timeout: 30000,
 })
 
+// SAM API also goes through the main API proxy now
 const samClient = axios.create({
-  baseURL: SAM_SERVICE_URL,
+  baseURL: '/api/v1',
   timeout: 60000,
 })
 
-// No auth interceptors for prototype
+// Add auth token to all requests (except login/register)
+apiClient.interceptors.request.use(
+  (config: InternalAxiosRequestConfig) => {
+    const token = localStorage.getItem('token')
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
+    return config
+  },
+  (error: AxiosError) => {
+    return Promise.reject(error)
+  }
+)
+
+// Handle 401 responses (token expired or invalid)
+apiClient.interceptors.response.use(
+  (response: AxiosResponse) => response,
+  (error: AxiosError) => {
+    if (error.response?.status === 401) {
+      // Clear token and redirect to login
+      localStorage.removeItem('token')
+      // Only redirect if not already on login page
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login'
+      }
+    }
+    return Promise.reject(error)
+  }
+)
+
+// Add same interceptors to samClient for consistency
+samClient.interceptors.request.use(
+  (config: InternalAxiosRequestConfig) => {
+    const token = localStorage.getItem('token')
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
+    return config
+  },
+  (error: AxiosError) => {
+    return Promise.reject(error)
+  }
+)
 
 export const authAPI = {
   login: async (email: string, password: string) => {
@@ -52,7 +95,7 @@ export const projectAPI = {
     return response.data
   },
 
-  getProjectCategories: async (projectId: number): Promise<Array<{id: number, name: string, color: string}>> => {
+  getProjectCategories: async (projectId: number): Promise<Array<{ id: number, name: string, color: string }>> => {
     const response = await apiClient.get(`/projects/${projectId}/categories`)
     return response.data
   },
@@ -84,11 +127,20 @@ export const videoAPI = {
     })
     return URL.createObjectURL(response.data)
   },
+
+  deleteVideo: async (videoId: number): Promise<void> => {
+    await apiClient.delete(`/videos/${videoId}`)
+  },
 }
 
 export const annotationAPI = {
   getAnnotations: async (frameId: number): Promise<Annotation[]> => {
     const response = await apiClient.get(`/frames/${frameId}/annotations`)
+    return response.data
+  },
+
+  getAnnotationsForFrame: async (videoId: number, frameNumber: number): Promise<any[]> => {
+    const response = await apiClient.get(`/videos/${videoId}/frames/${frameNumber}/annotations`)
     return response.data
   },
 
@@ -112,7 +164,7 @@ export const annotationAPI = {
     await apiClient.delete(`/annotations/${annotationId}`)
   },
 
-  getAnnotationMaskUrl: async (annotationId: number): Promise<{mask_url: string}> => {
+  getAnnotationMaskUrl: async (annotationId: number): Promise<{ mask_url: string }> => {
     const response = await apiClient.get(`/annotations/${annotationId}/mask-url`)
     return response.data
   },
@@ -127,25 +179,25 @@ export const samAPI = {
         points: request.points,
         boxes: request.boxes
       })
-      
+
       const response = await apiClient.post('/sam/predict', request, {
         timeout: 60000, // 60 seconds timeout for SAM predictions
         headers: {
           'Content-Type': 'application/json'
         }
       })
-      
+
       console.log('DEBUG: samAPI.predict response received:', {
         status: response.status,
         mask_length: response.data?.mask?.length,
         confidence: response.data?.confidence,
         processing_time: response.data?.processing_time
       })
-      
+
       if (!response.data?.mask) {
         throw new Error('No mask data received from SAM API')
       }
-      
+
       return response.data
     } catch (error: any) {
       console.error('DEBUG: samAPI.predict error:', {
@@ -154,7 +206,7 @@ export const samAPI = {
         status: error.response?.status,
         code: error.code
       })
-      
+
       if (error.code === 'ECONNABORTED') {
         throw new Error('SAM prediction timed out. Please try again.')
       } else if (error.response?.status === 422) {
@@ -162,7 +214,7 @@ export const samAPI = {
       } else if (error.response?.status === 500) {
         throw new Error('SAM prediction failed on server')
       }
-      
+
       throw error
     }
   },
@@ -176,7 +228,7 @@ export const maskAPI = {
         adjustment_type: adjustmentType,
         amount: amount
       })
-      
+
       return response.data.adjusted_mask
     } catch (error: any) {
       console.error('Mask adjustment failed:', error)

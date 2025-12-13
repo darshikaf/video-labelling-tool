@@ -5,7 +5,7 @@ A modern web application for medical video annotation using SAM (Segment Anythin
 ## Architecture
 
 - **Frontend**: React + TypeScript + Material-UI + Redux Toolkit
-- **Backend**: FastAPI + PostgreSQL + SQLAlchemy 
+- **Backend**: FastAPI + PostgreSQL + SQLAlchemy
 - **Object Storage**: MinIO (Development) / AWS S3 (Production) - for mask and binary data
 - **SAM Service**: Ultralytics SAM + Redis caching
 - **Deployment**: Docker + Docker Compose (Development) / EKS (Production)
@@ -44,14 +44,16 @@ cd video-labelling-tool
 
 2. Start all services:
 ```bash
-./start.sh
+./start.sh                    # Auto-detects platform
+./start.sh --cpu              # Force CPU-only (Linux compatible)
+./start.sh --gpu              # Force GPU mode (Apple Silicon/CUDA)
 ```
 
 3. Access the application:
 - Frontend: http://localhost:3000
-- Backend API: http://localhost:8000
+- Backend API: http://localhost:8888
 - SAM Service: http://localhost:8001
-- API Documentation: http://localhost:8000/docs
+- API Documentation: http://localhost:8888/docs
 - **MinIO Console**: http://localhost:9001 (admin interface)
 - **MinIO API**: http://localhost:9000 (object storage)
 
@@ -64,8 +66,11 @@ cp .env.example .env
 
 2. Start services individually:
 ```bash
-# All services
+# All services (Docker Compose v1)
 docker-compose up --build
+
+# All services (Docker Compose v2)
+docker compose up --build
 
 # Or specific services
 docker-compose up --build frontend backend sam-service database redis minio
@@ -73,21 +78,31 @@ docker-compose up --build frontend backend sam-service database redis minio
 
 3. View logs:
 ```bash
+# Docker Compose v1
 docker-compose logs -f [service-name]
+
+# Docker Compose v2
+docker compose logs -f [service-name]
 ```
 
 ## Development Commands
 
 ### Backend (FastAPI)
 ```bash
-# Run tests
+# Run tests (use your Docker Compose command)
 docker-compose exec backend python -m pytest
+# or
+docker compose exec backend python -m pytest
 
 # Database migrations
 docker-compose exec backend alembic upgrade head
+# or
+docker compose exec backend alembic upgrade head
 
 # Create new migration
 docker-compose exec backend alembic revision --autogenerate -m "description"
+# or
+docker compose exec backend alembic revision --autogenerate -m "description"
 ```
 
 ### Frontend (React)
@@ -187,7 +202,7 @@ video-labelling-tool/
 
 Core tables:
 - `users` - User accounts
-- `projects` - Annotation projects  
+- `projects` - Annotation projects
 - `videos` - Uploaded videos (metadata only)
 - `frames` - Video frame references
 - `categories` - Annotation categories
@@ -255,7 +270,7 @@ kubectl apply -f k8s/
 
 **Admin Console Access:**
 - URL: http://localhost:9001
-- Username: `minioadmin`  
+- Username: `minioadmin`
 - Password: `minioadmin`
 
 **API Configuration:**
@@ -280,15 +295,27 @@ MINIO_BUCKET=video-annotations
 
 View service logs:
 ```bash
+# Docker Compose v1
 docker-compose logs -f frontend
 docker-compose logs -f backend
 docker-compose logs -f sam-service
+
+# Docker Compose v2
+docker compose logs -f frontend
+docker compose logs -f backend
+docker compose logs -f sam-service
 ```
 
 ### Reset Development Environment
 
 ```bash
+# Docker Compose v1
 docker-compose down -v
+
+# Docker Compose v2
+docker compose down -v
+
+# Then continue with
 docker system prune -f
 ./start.sh
 ```

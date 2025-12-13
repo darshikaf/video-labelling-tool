@@ -1,6 +1,6 @@
-import { createSlice, createAsyncThunk } from '@reduxjs/toolkit'
 import { Video } from '@/types'
 import { videoAPI } from '@/utils/api'
+import { createAsyncThunk, createSlice } from '@reduxjs/toolkit'
 
 interface VideoState {
   videos: Video[]
@@ -52,6 +52,14 @@ export const fetchFrame = createAsyncThunk(
   }
 )
 
+export const deleteVideo = createAsyncThunk(
+  'video/deleteVideo',
+  async (videoId: number) => {
+    await videoAPI.deleteVideo(videoId)
+    return videoId
+  }
+)
+
 const videoSlice = createSlice({
   name: 'video',
   initialState,
@@ -98,6 +106,18 @@ const videoSlice = createSlice({
         }
         state.currentFrame = action.payload.frameNumber
         state.frameImageUrl = action.payload.imageUrl
+      })
+      .addCase(deleteVideo.pending, (state) => {
+        state.loading = true
+        state.error = null
+      })
+      .addCase(deleteVideo.fulfilled, (state, action) => {
+        state.loading = false
+        state.videos = state.videos.filter(video => video.id !== action.payload)
+      })
+      .addCase(deleteVideo.rejected, (state, action) => {
+        state.loading = false
+        state.error = action.error.message || 'Failed to delete video'
       })
   },
 })
