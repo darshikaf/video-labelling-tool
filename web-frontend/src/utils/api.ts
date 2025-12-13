@@ -1,5 +1,5 @@
 import { Annotation, Project, SAMPredictionRequest, SAMPredictionResponse, User, Video } from '@/types'
-import axios from 'axios'
+import axios, { AxiosError, AxiosResponse, InternalAxiosRequestConfig } from 'axios'
 
 // Use relative URLs so Vite proxy handles routing to the backend
 // In Docker: Vite proxies /api -> http://backend:8000
@@ -14,6 +14,50 @@ const samClient = axios.create({
   baseURL: '/api/v1',
   timeout: 60000,
 })
+
+// Add auth token to all requests (except login/register)
+apiClient.interceptors.request.use(
+  (config: InternalAxiosRequestConfig) => {
+    const token = localStorage.getItem('token')
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
+    return config
+  },
+  (error: AxiosError) => {
+    return Promise.reject(error)
+  }
+)
+
+// Handle 401 responses (token expired or invalid)
+apiClient.interceptors.response.use(
+  (response: AxiosResponse) => response,
+  (error: AxiosError) => {
+    if (error.response?.status === 401) {
+      // Clear token and redirect to login
+      localStorage.removeItem('token')
+      // Only redirect if not already on login page
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login'
+      }
+    }
+    return Promise.reject(error)
+  }
+)
+
+// Add same interceptors to samClient for consistency
+samClient.interceptors.request.use(
+  (config: InternalAxiosRequestConfig) => {
+    const token = localStorage.getItem('token')
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
+    return config
+  },
+  (error: AxiosError) => {
+    return Promise.reject(error)
+  }
+)
 
 export const authAPI = {
   login: async (email: string, password: string) => {
@@ -83,11 +127,20 @@ export const videoAPI = {
     })
     return URL.createObjectURL(response.data)
   },
+
+  deleteVideo: async (videoId: number): Promise<void> => {
+    await apiClient.delete(`/videos/${videoId}`)
+  },
 }
 
 export const annotationAPI = {
   getAnnotations: async (frameId: number): Promise<Annotation[]> => {
     const response = await apiClient.get(`/frames/${frameId}/annotations`)
+    return response.data
+  },
+
+  getAnnotationsForFrame: async (videoId: number, frameNumber: number): Promise<any[]> => {
+    const response = await apiClient.get(`/videos/${videoId}/frames/${frameNumber}/annotations`)
     return response.data
   },
 

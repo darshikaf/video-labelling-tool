@@ -1,5 +1,6 @@
 import { Box } from '@mui/material'
-import { useSelector } from 'react-redux'
+import { useEffect } from 'react'
+import { useDispatch, useSelector } from 'react-redux'
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
@@ -8,6 +9,7 @@ import { AnnotationPage } from '@/pages/AnnotationPage'
 import { DashboardPage } from '@/pages/DashboardPage'
 import { LoginPage } from '@/pages/LoginPage'
 import { ProjectPage } from '@/pages/ProjectPage'
+import { getCurrentUser } from '@/store/slices/authSlice'
 import { RootState } from '@/store/store'
 
 // Protected route wrapper - redirects to login if not authenticated
@@ -36,6 +38,16 @@ function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
 }
 
 function App() {
+  const dispatch = useDispatch()
+  const { token, user } = useSelector((state: RootState) => state.auth)
+
+  // Fetch user info on app load if token exists but user is not loaded
+  useEffect(() => {
+    if (token && !user) {
+      dispatch(getCurrentUser())
+    }
+  }, [token, user, dispatch])
+
   return (
     <ErrorBoundary>
       <Routes>

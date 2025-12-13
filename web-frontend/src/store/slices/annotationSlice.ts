@@ -166,7 +166,10 @@ const annotationSlice = createSlice({
         state.loading = false
         state.currentMask = action.payload.mask
         state.awaitingDecision = true
-        console.log('DEBUG: Redux - currentMask set to:', state.currentMask?.substring(0, 50))
+        // Clear prompts after mask is generated (they were just hints for SAM)
+        state.selectedPoints = []
+        state.selectedBoxes = []
+        console.log('DEBUG: Redux - currentMask set, prompts cleared')
       })
       .addCase(runSAMPrediction.rejected, (state, action) => {
         console.log('DEBUG: Redux - SAM prediction rejected:', action.error.message)

@@ -1,16 +1,16 @@
-import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react'
-import { Box, Button, ButtonGroup, Typography, FormControl, InputLabel, Select, MenuItem } from '@mui/material'
 import { PolygonPoint } from '@/types'
+import { Box, Button, ButtonGroup, FormControl, InputLabel, MenuItem, Select, Typography } from '@mui/material'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 
 /**
  * COORDINATE SYSTEM DOCUMENTATION:
- * 
+ *
  * This component uses a standardized 640x480 coordinate system for all annotation data:
  * - SAM points and boxes are stored in 640x480 coordinates
  * - Polygon points are stored in 640x480 coordinates
  * - The canvas display may have different dimensions, but all data is transformed
  *   from 640x480 to canvas coordinates for rendering
- * 
+ *
  * This ensures consistency across the entire annotation pipeline regardless of
  * the actual display size or original image dimensions.
  */
@@ -24,13 +24,18 @@ interface AnnotationCanvasProps {
   promptType: 'point' | 'box'
   onPromptTypeChange: (type: 'point' | 'box') => void
   currentMask: string | null
-  selectedPoints?: Array<{x: number, y: number, is_positive: boolean}>
-  selectedBoxes?: Array<{x1: number, y1: number, x2: number, y2: number}>
+  selectedPoints?: Array<{ x: number, y: number, is_positive: boolean }>
+  selectedBoxes?: Array<{ x1: number, y1: number, x2: number, y2: number }>
   existingAnnotations?: Array<{
     mask: string
     category: string
     color: string
+    annotationIndex?: number  // For opacity variation when multiple same-category annotations
+    annotationId?: number
+    isSelected?: boolean
   }>
+  onAnnotationClick?: (annotationId: number) => void
+  selectedAnnotationId?: number
   maxCanvasWidth?: number
   maxCanvasHeight?: number
   // Polygon editing props
@@ -54,6 +59,8 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   selectedPoints = [],
   selectedBoxes = [],
   existingAnnotations = [],
+  onAnnotationClick,
+  selectedAnnotationId,
   isPolygonMode = false,
   polygonPoints = [],
   onPolygonChange,
@@ -67,16 +74,19 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   })
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null)
+  // Store loaded mask image data for click detection on existing annotations
+  const loadedMasksRef = useRef<Map<number, ImageData>>(new Map())
   const [isDrawingBox, setIsDrawingBox] = useState(false)
   const [boxStart, setBoxStart] = useState<{ x: number, y: number } | null>(null)
+  const [boxCurrent, setBoxCurrent] = useState<{ x: number, y: number } | null>(null) // Current mouse position for box preview
   const [pointMode, setPointMode] = useState<'positive' | 'negative'>('positive')
-  
+
   // Polygon editing state
   const [selectedNode, setSelectedNode] = useState<number | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [hoveredNode, setHoveredNode] = useState<number | null>(null)
   const [hoveredEdge, setHoveredEdge] = useState<number | null>(null)
-  
+
   // CRITICAL: Store image scaling information for coordinate transformation using ref to avoid re-renders
   const imageScalingRef = useRef<{
     originalWidth: number
@@ -96,13 +106,13 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   // Helper function to transform coordinates from canvas to 640x480 SAM space
   const canvasToSAMCoords = useCallback((canvasX: number, canvasY: number) => {
     if (!imageScalingRef.current) return { x: canvasX, y: canvasY }
-    
+
     const { drawWidth, drawHeight, offsetX, offsetY } = imageScalingRef.current
-    
+
     // Remove offset and scale to 640x480 coordinates (same as SAM)
     const relativeX = (canvasX - offsetX) / drawWidth
     const relativeY = (canvasY - offsetY) / drawHeight
-    
+
     return {
       x: Math.round(relativeX * 640),
       y: Math.round(relativeY * 480)
@@ -115,21 +125,21 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       console.warn('No image scaling info available, returning raw coordinates')
       return { x: samX, y: samY }
     }
-    
+
     const { drawWidth, drawHeight, offsetX, offsetY } = imageScalingRef.current
-    
+
     // Validate input coordinates are within expected SAM space
     if (samX < 0 || samX > 640 || samY < 0 || samY > 480) {
       console.warn('SAM coordinates out of expected 640x480 range:', { samX, samY })
     }
-    
+
     // Convert from 640x480 SAM coordinates to canvas coordinates
     const relativeX = samX / 640
     const relativeY = samY / 480
-    
+
     const canvasX = relativeX * drawWidth + offsetX
     const canvasY = relativeY * drawHeight + offsetY
-    
+
     // Debug logging for coordinate transformation
     if (Math.random() < 0.1) { // Log 10% of transformations to avoid spam
       console.log('SAM to Canvas transformation:', {
@@ -139,20 +149,20 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
         scaling: { drawWidth, drawHeight, offsetX, offsetY }
       })
     }
-    
+
     return { x: canvasX, y: canvasY }
   }, [])
 
   // Helper function to transform coordinates from image to canvas space (legacy - keep for non-polygon features)
   const imageToCanvasCoords = useCallback((imageX: number, imageY: number) => {
     if (!imageScalingRef.current) return { x: imageX, y: imageY }
-    
+
     const { drawWidth, drawHeight, offsetX, offsetY, originalWidth, originalHeight } = imageScalingRef.current
-    
+
     // Scale from image to canvas coordinates and add offset
     const relativeX = imageX / originalWidth
     const relativeY = imageY / originalHeight
-    
+
     return {
       x: relativeX * drawWidth + offsetX,
       y: relativeY * drawHeight + offsetY
@@ -161,8 +171,8 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
 
   // Calculate distance from point to line segment
   const pointToLineDistance = (
-    px: number, py: number, 
-    x1: number, y1: number, 
+    px: number, py: number,
+    x1: number, y1: number,
     x2: number, y2: number
   ): { distance: number; t: number } => {
     const dx = x2 - x1
@@ -210,9 +220,9 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       // Convert polygon points from 640x480 SAM space to canvas coordinates
       const p1 = samToCanvasCoords(polygonPoints[i].x, polygonPoints[i].y)
       const p2 = samToCanvasCoords(polygonPoints[(i + 1) % polygonPoints.length].x, polygonPoints[(i + 1) % polygonPoints.length].y)
-      
+
       const { distance, t } = pointToLineDistance(canvasX, canvasY, p1.x, p1.y, p2.x, p2.y)
-      
+
       if (distance < minDist && distance <= EDGE_DISTANCE_THRESHOLD) {
         minDist = distance
         nearestEdge = { index: i, t }
@@ -231,16 +241,16 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     img.onload = () => {
       // Clear canvas
       ctx.clearRect(0, 0, width, height)
-      
+
       // Calculate scaling to fit image in canvas while maintaining aspect ratio
       const imgAspectRatio = img.width / img.height
       const canvasAspectRatio = width / height
-      
+
       let drawWidth = width
       let drawHeight = height
       let offsetX = 0
       let offsetY = 0
-      
+
       if (imgAspectRatio > canvasAspectRatio) {
         drawHeight = width / imgAspectRatio
         offsetY = (height - drawHeight) / 2
@@ -248,7 +258,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
         drawWidth = height * imgAspectRatio
         offsetX = (width - drawWidth) / 2
       }
-      
+
       // CRITICAL: Store scaling information for coordinate transformation
       imageScalingRef.current = {
         originalWidth: img.width,
@@ -258,40 +268,48 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
         offsetX,
         offsetY
       }
-      
+
       console.log('DEBUG: Image scaling info:', {
         original: `${img.width}x${img.height}`,
         displayed: `${drawWidth}x${drawHeight}`,
         offset: `(${offsetX}, ${offsetY})`,
         canvas: `${width}x${height}`
       })
-      
+
       // Draw image
       ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight)
-      
+
+      // Clear loaded masks ref before loading new ones
+      loadedMasksRef.current.clear()
+
       // Only draw existing annotations on base canvas
       existingAnnotations.forEach((annotation, index) => {
         if (annotation.mask) {
-          drawMaskOverlay(ctx, annotation.mask, annotation.color, 0.3)
+          // Highlight selected annotation with higher opacity and different outline
+          const isSelected = annotation.annotationId === selectedAnnotationId
+          const baseOpacity = isSelected ? 0.5 : 0.35
+          const opacityVariation = (index % 3) * 0.08 // 0, 0.08, 0.16
+          const opacity = baseOpacity + opacityVariation
+          drawMaskOverlay(ctx, annotation.mask, annotation.color, opacity, annotation.annotationId, isSelected)
         }
       })
-      
+
       // Current mask will be drawn on overlay canvas, not here
     }
     img.src = frameImageUrl
-  }, [frameImageUrl, width, height, existingAnnotations])
+  }, [frameImageUrl, width, height, existingAnnotations, selectedAnnotationId])
 
-  const drawMaskOverlay = (ctx: CanvasRenderingContext2D, maskData: string, color: string, alpha: number) => {
+  const drawMaskOverlay = (ctx: CanvasRenderingContext2D, maskData: string, color: string, alpha: number, annotationId?: number, isSelected?: boolean) => {
     try {
-      console.log('DEBUG: drawMaskOverlay called with:', { maskDataLength: maskData?.length, color, alpha })
-      
+      console.log('DEBUG: drawMaskOverlay called with:', { maskDataLength: maskData?.length, color, alpha, annotationId, isSelected })
+
       if (maskData) {
         // Create image from base64 mask data
         const maskImage = new Image()
         maskImage.onload = () => {
           console.log('DEBUG: Mask image loaded, dimensions:', { width: maskImage.width, height: maskImage.height })
           console.log('DEBUG: Expected image scaling info:', imageScalingRef.current)
-          
+
           // Create a temporary canvas to process the mask
           const tempCanvas = document.createElement('canvas')
           const tempCtx = tempCanvas.getContext('2d')
@@ -302,34 +320,34 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
 
           tempCanvas.width = maskImage.width
           tempCanvas.height = maskImage.height
-          
+
           // Draw the mask image
           tempCtx.drawImage(maskImage, 0, 0)
-          
+
           // Get image data to process pixel by pixel
           const imageData = tempCtx.getImageData(0, 0, maskImage.width, maskImage.height)
           const data = imageData.data
-          
+
           console.log('DEBUG: Processing mask image data, total pixels:', data.length / 4)
-          
+
           let maskPixelCount = 0
           let sampleValues = []
           // Convert grayscale mask to colored overlay
           for (let i = 0; i < data.length; i += 4) {
             const maskValue = data[i] // R channel (grayscale)
-            
+
             // Sample first 10 pixel values for debugging
             if (sampleValues.length < 10) {
               sampleValues.push(maskValue)
             }
-            
+
             if (maskValue > 128) { // If pixel is part of mask (white)
               maskPixelCount++
               // Parse color string (e.g., '#ff0000' -> RGB)
               const r = parseInt(color.substr(1, 2), 16)
               const g = parseInt(color.substr(3, 2), 16)
               const b = parseInt(color.substr(5, 2), 16)
-              
+
               data[i] = r     // R
               data[i + 1] = g // G
               data[i + 2] = b // B
@@ -338,13 +356,13 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
               data[i + 3] = 0 // Transparent for non-mask areas
             }
           }
-          
+
           console.log('DEBUG: Mask pixels found:', maskPixelCount)
           console.log('DEBUG: Sample pixel values:', sampleValues)
-          
+
           if (maskPixelCount === 0) {
             console.log('DEBUG: WARNING - No mask pixels found with threshold 128! Trying with lower threshold...')
-            
+
             // Try with threshold 0 (any non-zero pixel)
             let lowThresholdCount = 0
             for (let i = 0; i < data.length; i += 4) {
@@ -355,7 +373,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
                 const r = parseInt(color.substr(1, 2), 16)
                 const g = parseInt(color.substr(3, 2), 16)
                 const b = parseInt(color.substr(5, 2), 16)
-                
+
                 data[i] = r     // R
                 data[i + 1] = g // G
                 data[i + 2] = b // B
@@ -364,10 +382,10 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
                 data[i + 3] = 0 // Transparent for non-mask areas
               }
             }
-            
+
             console.log('DEBUG: Mask pixels found with threshold 0:', lowThresholdCount)
             maskPixelCount = lowThresholdCount
-            
+
             if (maskPixelCount > 0) {
               tempCtx.putImageData(imageData, 0, 0)
             }
@@ -375,40 +393,104 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
             // Only update canvas if we found mask pixels with the high threshold
             tempCtx.putImageData(imageData, 0, 0)
           }
-          
+
+          // Store mask data for click detection if this is an existing annotation
+          if (annotationId !== undefined && maskPixelCount > 0) {
+            loadedMasksRef.current.set(annotationId, imageData)
+          }
+
           // Draw the processed mask onto the main canvas
           // ENFORCED STANDARD: All masks must be 640x480 from SAM backend
           if (maskImage.width !== 640 || maskImage.height !== 480) {
             console.error(`Invalid mask dimensions: ${maskImage.width}x${maskImage.height}, expected 640x480. This indicates a backend issue.`)
             console.error('Mask will be displayed but may have alignment issues.')
           }
-          
+
+          // Add high-contrast outline around mask edges for visibility
+          const outlineCanvas = document.createElement('canvas')
+          outlineCanvas.width = tempCanvas.width
+          outlineCanvas.height = tempCanvas.height
+          const outlineCtx = outlineCanvas.getContext('2d')
+
+          if (outlineCtx) {
+            // Get the mask data to find edges
+            const maskImageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height)
+            const maskPixels = maskImageData.data
+
+            // Create edge detection - find pixels where mask meets non-mask
+            const edgeData = outlineCtx.createImageData(tempCanvas.width, tempCanvas.height)
+            const edgePixels = edgeData.data
+            const w = tempCanvas.width
+            const h = tempCanvas.height
+
+            for (let y = 1; y < h - 1; y++) {
+              for (let x = 1; x < w - 1; x++) {
+                const idx = (y * w + x) * 4
+                const currentAlpha = maskPixels[idx + 3]
+
+                // Check if this is a mask pixel
+                if (currentAlpha > 0) {
+                  // Check neighbors for edge detection
+                  const neighbors = [
+                    ((y - 1) * w + x) * 4,     // top
+                    ((y + 1) * w + x) * 4,     // bottom
+                    (y * w + (x - 1)) * 4,     // left
+                    (y * w + (x + 1)) * 4,     // right
+                  ]
+
+                  const isEdge = neighbors.some(nIdx => maskPixels[nIdx + 3] === 0)
+
+                  if (isEdge) {
+                    // Draw white outline pixel with some spread
+                    edgePixels[idx] = 255     // R (white)
+                    edgePixels[idx + 1] = 255 // G
+                    edgePixels[idx + 2] = 255 // B
+                    edgePixels[idx + 3] = 255 // Full opacity
+                  }
+                }
+              }
+            }
+
+            outlineCtx.putImageData(edgeData, 0, 0)
+          }
+
           if (imageScalingRef.current) {
             const { drawWidth, drawHeight, offsetX, offsetY } = imageScalingRef.current
-            
+
             // Always scale from 640x480 SAM space to display area
             console.log('DEBUG: Drawing 640x480 mask scaled to display area:', {
               maskDimensions: { width: maskImage.width, height: maskImage.height },
               displayArea: { width: drawWidth, height: drawHeight, offsetX, offsetY }
             })
+            // Draw the filled mask first
             ctx.drawImage(tempCanvas, offsetX, offsetY, drawWidth, drawHeight)
+            // Draw the white outline on top for visibility
+            ctx.drawImage(outlineCanvas, offsetX, offsetY, drawWidth, drawHeight)
           } else {
             // Fallback to full canvas if no scaling info available
             console.warn('DEBUG: No image scaling info available, falling back to full canvas')
             ctx.drawImage(tempCanvas, 0, 0, width, height)
+            ctx.drawImage(outlineCanvas, 0, 0, width, height)
           }
-          console.log('DEBUG: Mask overlay drawn to main canvas with', maskPixelCount, 'mask pixels')
+          console.log('DEBUG: Mask overlay with outline drawn to main canvas with', maskPixelCount, 'mask pixels')
         }
-        
+
         maskImage.onerror = (error) => {
           console.error('DEBUG: Mask image failed to load:', error)
         }
-        
-        // Handle base64 data URL format
+
+        // Handle different mask data formats
         if (maskData.startsWith('data:image')) {
+          // Already a data URL
           console.log('DEBUG: Using data URL format')
           maskImage.src = maskData
+        } else if (maskData.startsWith('/') || maskData.startsWith('http')) {
+          // It's a URL - load directly (CORS should be fine since it goes through our API)
+          console.log('DEBUG: Loading mask from URL:', maskData)
+          maskImage.crossOrigin = 'anonymous'
+          maskImage.src = maskData
         } else {
+          // Assume it's base64 data that needs a data URL prefix
           console.log('DEBUG: Converting to data URL format')
           maskImage.src = `data:image/png;base64,${maskData}`
         }
@@ -441,7 +523,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       let maskColor = '#00ff00' // Default green for positive
       const lastPositivePoint = selectedPoints.slice().reverse().find(p => p.is_positive)
       const lastNegativePoint = selectedPoints.slice().reverse().find(p => !p.is_positive)
-      
+
       // If we have both positive and negative points, use the most recent one's color
       if (lastNegativePoint && lastPositivePoint) {
         const lastNegativeIndex = selectedPoints.lastIndexOf(lastNegativePoint)
@@ -450,7 +532,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       } else if (lastNegativePoint && !lastPositivePoint) {
         maskColor = '#ff0000' // Red if only negative points
       }
-      
+
       console.log('DEBUG: Drawing current mask in overlay with length:', currentMask.length, 'color:', maskColor)
       drawMaskOverlay(ctx, currentMask, maskColor, 0.6)
     }
@@ -458,16 +540,16 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     // Draw selected points (convert from 640x480 coordinates to canvas coordinates)
     selectedPoints.forEach((point) => {
       if (!imageScalingRef.current) return
-      
+
       // Convert 640x480 coordinates back to canvas coordinates for display
       const canvasX = (point.x / 640) * imageScalingRef.current.drawWidth + imageScalingRef.current.offsetX
       const canvasY = (point.y / 480) * imageScalingRef.current.drawHeight + imageScalingRef.current.offsetY
-      
-      console.log('DEBUG: Rendering point at canvas coords:', { 
-        stored640x480: { x: point.x, y: point.y }, 
-        canvas: { x: canvasX, y: canvasY } 
+
+      console.log('DEBUG: Rendering point at canvas coords:', {
+        stored640x480: { x: point.x, y: point.y },
+        canvas: { x: canvasX, y: canvasY }
       })
-      
+
       ctx.beginPath()
       ctx.arc(canvasX, canvasY, 6, 0, 2 * Math.PI)
       ctx.fillStyle = point.is_positive ? '#00ff00' : '#ff0000'
@@ -480,13 +562,13 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     // Draw selected boxes (convert from 640x480 coordinates to canvas coordinates)
     selectedBoxes.forEach((box) => {
       if (!imageScalingRef.current) return
-      
+
       // Convert 640x480 coordinates back to canvas coordinates for display
       const canvasX1 = (box.x1 / 640) * imageScalingRef.current.drawWidth + imageScalingRef.current.offsetX
       const canvasY1 = (box.y1 / 480) * imageScalingRef.current.drawHeight + imageScalingRef.current.offsetY
       const canvasX2 = (box.x2 / 640) * imageScalingRef.current.drawWidth + imageScalingRef.current.offsetX
       const canvasY2 = (box.y2 / 480) * imageScalingRef.current.drawHeight + imageScalingRef.current.offsetY
-      
+
       ctx.strokeStyle = '#0088ff'
       ctx.lineWidth = 2
       ctx.setLineDash([])
@@ -496,15 +578,19 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     })
 
     // Draw box being drawn (convert from 640x480 coordinates to canvas coordinates)
-    if (isDrawingBox && boxStart && imageScalingRef.current) {
-      const canvasX = (boxStart.x / 640) * imageScalingRef.current.drawWidth + imageScalingRef.current.offsetX
-      const canvasY = (boxStart.y / 480) * imageScalingRef.current.drawHeight + imageScalingRef.current.offsetY
-      
+    if (isDrawingBox && boxStart && boxCurrent && imageScalingRef.current) {
+      const canvasX1 = (boxStart.x / 640) * imageScalingRef.current.drawWidth + imageScalingRef.current.offsetX
+      const canvasY1 = (boxStart.y / 480) * imageScalingRef.current.drawHeight + imageScalingRef.current.offsetY
+      const canvasX2 = (boxCurrent.x / 640) * imageScalingRef.current.drawWidth + imageScalingRef.current.offsetX
+      const canvasY2 = (boxCurrent.y / 480) * imageScalingRef.current.drawHeight + imageScalingRef.current.offsetY
+
+      const boxWidth = Math.abs(canvasX2 - canvasX1)
+      const boxHeight = Math.abs(canvasY2 - canvasY1)
+
       ctx.strokeStyle = '#ff0000'
       ctx.lineWidth = 2
       ctx.setLineDash([5, 5])
-      // This would be updated with current mouse position in a real implementation
-      ctx.strokeRect(canvasX, canvasY, 100, 100)
+      ctx.strokeRect(Math.min(canvasX1, canvasX2), Math.min(canvasY1, canvasY2), boxWidth, boxHeight)
       ctx.setLineDash([])
     }
 
@@ -515,27 +601,27 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       if (outOfBoundsPoints.length > 0) {
         console.warn('Polygon points outside expected 640x480 range:', outOfBoundsPoints)
       }
-      
+
       console.log('Drawing polygon in editing mode:', {
         polygonPointsCount: polygonPoints.length,
         coordinateSpace: '640x480 (SAM standard)',
         imageScaling: imageScalingRef.current,
         samplePoints: polygonPoints.slice(0, 3)
       })
-      
+
       // Convert polygon points from 640x480 SAM space to canvas coordinates
       // This uses the exact same transformation as SAM points for consistency
       const canvasPoints = polygonPoints.map((point, index) => {
         const canvasCoords = samToCanvasCoords(point.x, point.y)
-        
+
         // Log first few transformations for debugging
         if (index < 3) {
           console.log(`Polygon point ${index}: ${point.x},${point.y} (640x480) → ${canvasCoords.x.toFixed(1)},${canvasCoords.y.toFixed(1)} (canvas)`)
         }
-        
+
         return canvasCoords
       })
-      
+
       if (canvasPoints.length >= 2) {
         // Draw filled polygon background (semi-transparent)
         if (canvasPoints.length >= 3) {
@@ -553,16 +639,16 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
         canvasPoints.forEach((point, index) => {
           const nextIndex = (index + 1) % canvasPoints.length
           const nextPoint = canvasPoints[nextIndex]
-          
+
           ctx.beginPath()
           ctx.moveTo(point.x, point.y)
           ctx.lineTo(nextPoint.x, nextPoint.y)
-          
+
           // Highlight edges connected to selected/hovered nodes or hovered edge
           const isConnectedToSelected = (selectedNode === index || selectedNode === nextIndex)
           const isConnectedToHovered = (hoveredNode === index || hoveredNode === nextIndex)
           const isHoveredEdge = (hoveredEdge === index)
-          
+
           if (isHoveredEdge) {
             ctx.strokeStyle = '#ffff00' // Yellow for hovered edge
             ctx.lineWidth = EDGE_WIDTH + 2
@@ -576,17 +662,17 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
             ctx.strokeStyle = '#00ff00' // Green for normal edges
             ctx.lineWidth = EDGE_WIDTH
           }
-          
+
           ctx.stroke()
         })
 
         // Draw nodes
         canvasPoints.forEach((point, index) => {
           const radius = (selectedNode === index || hoveredNode === index) ? NODE_SELECTED_RADIUS : NODE_RADIUS
-          
+
           ctx.beginPath()
           ctx.arc(point.x, point.y, radius, 0, 2 * Math.PI)
-          
+
           // Fill color based on state
           if (selectedNode === index) {
             ctx.fillStyle = '#ff0000' // Red for selected
@@ -595,9 +681,9 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
           } else {
             ctx.fillStyle = '#0066ff' // Blue for normal
           }
-          
+
           ctx.fill()
-          
+
           // White border
           ctx.strokeStyle = '#ffffff'
           ctx.lineWidth = 2
@@ -605,7 +691,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
         })
       }
     }
-  }, [isDrawingBox, boxStart, width, height, selectedPoints, selectedBoxes, currentMask, existingAnnotations, isPolygonMode, polygonPoints, selectedNode, hoveredNode, hoveredEdge])
+  }, [isDrawingBox, boxStart, boxCurrent, width, height, selectedPoints, selectedBoxes, currentMask, existingAnnotations, isPolygonMode, polygonPoints, selectedNode, hoveredNode, hoveredEdge])
 
   useEffect(() => {
     drawImage()
@@ -617,7 +703,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
 
   const handleCanvasMouseDown = (event: React.MouseEvent<HTMLCanvasElement>) => {
     console.log('DEBUG: Canvas mouse down at', { promptType, pointMode, isPolygonMode })
-    
+
     const canvas = canvasRef.current
     if (!canvas) {
       console.log('DEBUG: No canvas reference found')
@@ -635,10 +721,10 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     console.log('DEBUG: Raw canvas coordinates:', { canvasX, canvasY })
 
     // Check if click is within the displayed image area
-    if (canvasX < imageScalingRef.current.offsetX || 
-        canvasX > imageScalingRef.current.offsetX + imageScalingRef.current.drawWidth ||
-        canvasY < imageScalingRef.current.offsetY || 
-        canvasY > imageScalingRef.current.offsetY + imageScalingRef.current.drawHeight) {
+    if (canvasX < imageScalingRef.current.offsetX ||
+      canvasX > imageScalingRef.current.offsetX + imageScalingRef.current.drawWidth ||
+      canvasY < imageScalingRef.current.offsetY ||
+      canvasY > imageScalingRef.current.offsetY + imageScalingRef.current.drawHeight) {
       console.log('DEBUG: Click outside image area, ignoring')
       return
     }
@@ -667,17 +753,17 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
         const newPoints = [...polygonPoints]
         const p1 = newPoints[nearestEdge.index]
         const p2 = newPoints[(nearestEdge.index + 1) % newPoints.length]
-        
+
         // Calculate the new point on the edge in SAM coordinate space
         const p1Sam = polygonPoints[nearestEdge.index]
         const p2Sam = polygonPoints[(nearestEdge.index + 1) % polygonPoints.length]
-        
+
         // Interpolate in SAM coordinate space directly
         const newSamPoint = {
           x: Math.round(p1Sam.x + nearestEdge.t * (p2Sam.x - p1Sam.x)),
           y: Math.round(p1Sam.y + nearestEdge.t * (p2Sam.y - p1Sam.y))
         }
-        
+
         newPoints.splice(nearestEdge.index + 1, 0, newSamPoint)
         onPolygonChange(newPoints)
       }
@@ -698,6 +784,29 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       scaled640x480: { x: scaledX, y: scaledY }
     })
 
+    // Check if clicking on an existing annotation (for editing)
+    if (onAnnotationClick && loadedMasksRef.current.size > 0) {
+      // Check each loaded mask to see if the click is on it
+      for (const [annotationId, imageData] of loadedMasksRef.current.entries()) {
+        // Convert scaled coordinates to mask pixel coordinates
+        const maskX = Math.floor(scaledX)
+        const maskY = Math.floor(scaledY)
+
+        // Check bounds
+        if (maskX >= 0 && maskX < 640 && maskY >= 0 && maskY < 480) {
+          const pixelIndex = (maskY * 640 + maskX) * 4
+          const pixelAlpha = imageData.data[pixelIndex + 3]
+
+          // If this pixel has alpha > 0, it's part of the mask
+          if (pixelAlpha > 0) {
+            console.log('DEBUG: Clicked on existing annotation:', annotationId)
+            onAnnotationClick(annotationId)
+            return // Don't create new annotation
+          }
+        }
+      }
+    }
+
     if (promptType === 'point') {
       const isPositive = pointMode === 'positive'
       console.log('DEBUG: Calling onPointClick with 640x480 coordinates:', { x: scaledX, y: scaledY, isPositive })
@@ -707,23 +816,23 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
         console.log('DEBUG: Starting box drawing')
         setIsDrawingBox(true)
         setBoxStart({ x: scaledX, y: scaledY })
+        setBoxCurrent({ x: scaledX, y: scaledY }) // Initialize current to start position
       } else {
         console.log('DEBUG: Finishing box drawing')
         if (boxStart) {
-          console.log('DEBUG: Calling onBoxSelect with 640x480 coordinates:', { 
-            x1: boxStart.x, y1: boxStart.y, x2: scaledX, y2: scaledY 
+          console.log('DEBUG: Calling onBoxSelect with 640x480 coordinates:', {
+            x1: boxStart.x, y1: boxStart.y, x2: scaledX, y2: scaledY
           })
           onBoxSelect(boxStart.x, boxStart.y, scaledX, scaledY)
           setIsDrawingBox(false)
           setBoxStart(null)
+          setBoxCurrent(null) // Clear current position
         }
       }
     }
   }
 
   const handleCanvasMouseMove = (event: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isPolygonMode) return
-    
     const canvas = canvasRef.current
     if (!canvas || !imageScalingRef.current) return
 
@@ -732,12 +841,22 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     const canvasY = event.clientY - rect.top
 
     // Check if within image area
-    if (canvasX < imageScalingRef.current.offsetX || 
-        canvasX > imageScalingRef.current.offsetX + imageScalingRef.current.drawWidth ||
-        canvasY < imageScalingRef.current.offsetY || 
-        canvasY > imageScalingRef.current.offsetY + imageScalingRef.current.drawHeight) {
+    if (canvasX < imageScalingRef.current.offsetX ||
+      canvasX > imageScalingRef.current.offsetX + imageScalingRef.current.drawWidth ||
+      canvasY < imageScalingRef.current.offsetY ||
+      canvasY > imageScalingRef.current.offsetY + imageScalingRef.current.drawHeight) {
       return
     }
+
+    // Handle box drawing preview
+    if (isDrawingBox && promptType === 'box') {
+      const samCoords = canvasToSAMCoords(canvasX, canvasY)
+      setBoxCurrent({ x: samCoords.x, y: samCoords.y })
+      return
+    }
+
+    // Handle polygon mode
+    if (!isPolygonMode) return
 
     if (isDragging && selectedNode !== null && onPolygonChange) {
       // Update node position while dragging in SAM coordinate space
@@ -749,10 +868,10 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       // Update hover states for visual feedback
       const nearestNode = findNearestNode(canvasX, canvasY)
       const nearestEdge = nearestNode === null ? findNearestEdge(canvasX, canvasY) : null
-      
+
       setHoveredNode(nearestNode)
       setHoveredEdge(nearestEdge?.index ?? null)
-      
+
       // Update cursor based on what's being hovered
       if (nearestNode !== null) {
         canvas.style.cursor = 'move'
@@ -786,7 +905,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     ctx.fillStyle = 'black'
     ctx.fillRect(0, 0, canvas.width, canvas.height)
     ctx.fillStyle = 'white'
-    
+
     ctx.beginPath()
     ctx.moveTo(points[0].x, points[0].y)
     for (let i = 1; i < points.length; i++) {
@@ -871,7 +990,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
             zIndex: 1
           }}
         />
-        
+
         {/* Overlay canvas for temporary drawings */}
         <canvas
           ref={overlayCanvasRef}
@@ -905,9 +1024,9 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       {/* Instructions */}
       <Box sx={{ mt: 1 }}>
         <Typography variant="caption" color="text.secondary">
-          {promptType === 'point' 
+          {promptType === 'point'
             ? `Click on the image to add ${pointMode} points for SAM segmentation`
-            : isDrawingBox 
+            : isDrawingBox
               ? 'Click to finish drawing the bounding box'
               : 'Click and drag to draw a bounding box for SAM segmentation'
           }
