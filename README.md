@@ -5,7 +5,7 @@ A modern web application for medical video annotation using SAM (Segment Anythin
 ## Architecture
 
 - **Frontend**: React + TypeScript + Material-UI + Redux Toolkit
-- **Backend**: FastAPI + PostgreSQL + SQLAlchemy 
+- **Backend**: FastAPI + PostgreSQL + SQLAlchemy
 - **Object Storage**: MinIO (Development) / AWS S3 (Production) - for mask and binary data
 - **SAM Service**: Ultralytics SAM + Redis caching
 - **Deployment**: Docker + Docker Compose (Development) / EKS (Production)
@@ -51,9 +51,9 @@ cd video-labelling-tool
 
 3. Access the application:
 - Frontend: http://localhost:3000
-- Backend API: http://localhost:8000
+- Backend API: http://localhost:8888
 - SAM Service: http://localhost:8001
-- API Documentation: http://localhost:8000/docs
+- API Documentation: http://localhost:8888/docs
 - **MinIO Console**: http://localhost:9001 (admin interface)
 - **MinIO API**: http://localhost:9000 (object storage)
 
@@ -81,7 +81,7 @@ docker-compose up --build frontend backend sam-service database redis minio
 # Docker Compose v1
 docker-compose logs -f [service-name]
 
-# Docker Compose v2  
+# Docker Compose v2
 docker compose logs -f [service-name]
 ```
 
@@ -202,7 +202,7 @@ video-labelling-tool/
 
 Core tables:
 - `users` - User accounts
-- `projects` - Annotation projects  
+- `projects` - Annotation projects
 - `videos` - Uploaded videos (metadata only)
 - `frames` - Video frame references
 - `categories` - Annotation categories
@@ -270,7 +270,7 @@ kubectl apply -f k8s/
 
 **Admin Console Access:**
 - URL: http://localhost:9001
-- Username: `minioadmin`  
+- Username: `minioadmin`
 - Password: `minioadmin`
 
 **API Configuration:**

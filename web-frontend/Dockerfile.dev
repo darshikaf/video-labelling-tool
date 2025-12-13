@@ -2,11 +2,20 @@ FROM node:18-alpine
 
 WORKDIR /app
 
+# Install dependencies for native builds (needed for some npm packages)
+RUN apk add --no-cache python3 make g++
+
 COPY package*.json ./
 RUN npm install
 
+# Copy source (will be overridden by volume mount in dev)
 COPY . .
+
+# Set environment variables for Docker
+ENV VITE_BACKEND_URL=http://backend:8000
+ENV VITE_SAM_URL=http://sam-service:8001
 
 EXPOSE 3000
 
-CMD ["npm", "run", "dev"]
+# Use host 0.0.0.0 to allow external access
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]

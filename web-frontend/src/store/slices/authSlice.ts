@@ -1,6 +1,6 @@
-import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit'
 import { User } from '@/types'
 import { authAPI } from '@/utils/api'
+import { createAsyncThunk, createSlice } from '@reduxjs/toolkit'
 
 interface AuthState {
   user: User | null
@@ -21,7 +21,10 @@ export const login = createAsyncThunk(
   async ({ email, password }: { email: string; password: string }) => {
     const response = await authAPI.login(email, password)
     localStorage.setItem('token', response.access_token)
-    return response
+
+    // Also fetch user info after successful login
+    const user = await authAPI.getCurrentUser()
+    return { ...response, user }
   }
 )
 
@@ -63,6 +66,7 @@ const authSlice = createSlice({
       .addCase(login.fulfilled, (state, action) => {
         state.loading = false
         state.token = action.payload.access_token
+        state.user = action.payload.user
       })
       .addCase(login.rejected, (state, action) => {
         state.loading = false

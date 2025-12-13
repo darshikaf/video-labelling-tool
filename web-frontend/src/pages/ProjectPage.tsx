@@ -1,39 +1,46 @@
-import React, { useEffect, useState, useRef } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
-import { useDispatch, useSelector } from 'react-redux'
-import { 
-  Container, 
-  Typography, 
-  Grid, 
-  Card, 
-  CardContent, 
-  Button, 
-  Box,
-  Paper,
-  LinearProgress,
-  Chip,
-  IconButton
-} from '@mui/material'
-import { 
-  CloudUpload, 
-  PlayArrow, 
-  VideoFile,
-  Delete
-} from '@mui/icons-material'
-import { RootState } from '@/store/store'
 import { fetchProject } from '@/store/slices/projectSlice'
-import { fetchVideos, uploadVideo } from '@/store/slices/videoSlice'
+import { deleteVideo, fetchVideos, uploadVideo } from '@/store/slices/videoSlice'
+import { RootState } from '@/store/store'
+import {
+  CloudUpload,
+  Delete,
+  PlayArrow,
+  VideoFile
+} from '@mui/icons-material'
+import {
+  Box,
+  Button,
+  Card,
+  CardContent,
+  Chip,
+  Container,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
+  Grid,
+  IconButton,
+  LinearProgress,
+  Paper,
+  Typography
+} from '@mui/material'
+import React, { useEffect, useRef, useState } from 'react'
+import { useDispatch, useSelector } from 'react-redux'
+import { useNavigate, useParams } from 'react-router-dom'
 
 export const ProjectPage = () => {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
   const dispatch = useDispatch()
   const fileInputRef = useRef<HTMLInputElement>(null)
-  
+
   const { currentProject } = useSelector((state: RootState) => state.project)
   const { videos, loading } = useSelector((state: RootState) => state.video)
-  
+
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [videoToDelete, setVideoToDelete] = useState<{ id: number; filename: string } | null>(null)
 
   useEffect(() => {
     if (projectId) {
@@ -48,21 +55,21 @@ export const ProjectPage = () => {
 
     // Validate file type
     const allowedTypes = [
-      'video/mp4', 
-      'video/avi', 
-      'video/mov', 
+      'video/mp4',
+      'video/avi',
+      'video/mov',
       'video/quicktime',  // Standard QuickTime MIME type
       'video/x-quicktime', // Alternative QuickTime MIME type
-      'video/mkv', 
+      'video/mkv',
       'video/x-matroska', // Alternative MKV MIME type
       'video/wmv',
       'video/x-ms-wmv'   // Alternative WMV MIME type
     ]
-    
+
     // Also check file extension as fallback for QuickTime files
     const fileExtension = file.name.toLowerCase().split('.').pop()
     const allowedExtensions = ['mp4', 'avi', 'mov', 'qt', 'mkv', 'wmv']
-    
+
     // Validate by MIME type or file extension (fallback for QuickTime)
     const isValidType = allowedTypes.includes(file.type) || allowedExtensions.includes(fileExtension || '')
     if (!isValidType) {
@@ -79,7 +86,7 @@ export const ProjectPage = () => {
 
     try {
       setUploadProgress(0)
-      
+
       // Simulate upload progress
       const progressInterval = setInterval(() => {
         setUploadProgress(prev => {
@@ -90,23 +97,23 @@ export const ProjectPage = () => {
       }, 200)
 
       await dispatch(uploadVideo({ projectId: parseInt(projectId), file }))
-      
+
       clearInterval(progressInterval)
       setUploadProgress(100)
-      
+
       setTimeout(() => {
         setUploadProgress(null)
       }, 1000)
-      
+
       // Refresh video list
       dispatch(fetchVideos(parseInt(projectId)))
-      
+
     } catch (error) {
       console.error('Upload failed:', error)
       setUploadProgress(null)
       alert('Upload failed. Please try again.')
     }
-    
+
     // Reset file input
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
@@ -155,7 +162,7 @@ export const ProjectPage = () => {
         <Typography variant="h6" gutterBottom>
           Upload Video
         </Typography>
-        
+
         <Box
           sx={{
             border: '2px dashed',
@@ -178,7 +185,7 @@ export const ProjectPage = () => {
           <Typography variant="body2" color="text.secondary">
             Supported formats: MP4, AVI, MOV/QT (QuickTime), MKV, WMV (Max 500MB)
           </Typography>
-          
+
           <input
             ref={fileInputRef}
             type="file"
@@ -187,7 +194,7 @@ export const ProjectPage = () => {
             onChange={handleFileSelect}
           />
         </Box>
-        
+
         {uploadProgress !== null && (
           <Box sx={{ mt: 2 }}>
             <LinearProgress variant="determinate" value={uploadProgress} />
@@ -202,7 +209,7 @@ export const ProjectPage = () => {
       <Typography variant="h5" gutterBottom>
         Videos ({videos.length})
       </Typography>
-      
+
       <Grid container spacing={3}>
         {videos.map((video) => (
           <Grid item xs={12} sm={6} md={4} key={video.id}>
@@ -214,38 +221,38 @@ export const ProjectPage = () => {
                     {video.filename}
                   </Typography>
                 </Box>
-                
+
                 <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
-                  <Chip 
-                    label={formatFileSize(video.file_size)} 
-                    size="small" 
-                    variant="outlined" 
+                  <Chip
+                    label={formatFileSize(video.file_size)}
+                    size="small"
+                    variant="outlined"
                   />
-                  <Chip 
-                    label={formatDuration(video.duration)} 
-                    size="small" 
-                    variant="outlined" 
+                  <Chip
+                    label={formatDuration(video.duration)}
+                    size="small"
+                    variant="outlined"
                   />
                   {video.width && video.height && (
-                    <Chip 
-                      label={`${video.width}x${video.height}`} 
-                      size="small" 
-                      variant="outlined" 
+                    <Chip
+                      label={`${video.width}x${video.height}`}
+                      size="small"
+                      variant="outlined"
                     />
                   )}
                 </Box>
-                
+
                 {video.fps && (
                   <Typography variant="body2" color="text.secondary">
                     {video.fps.toFixed(1)} FPS • {video.total_frames} frames
                   </Typography>
                 )}
-                
+
                 <Typography variant="caption" display="block" sx={{ mt: 1 }}>
                   Uploaded: {new Date(video.created_at).toLocaleDateString()}
                 </Typography>
               </CardContent>
-              
+
               <Box sx={{ p: 2, pt: 0 }}>
                 <Button
                   variant="contained"
@@ -256,15 +263,16 @@ export const ProjectPage = () => {
                 >
                   Start Annotation
                 </Button>
-                
+
                 <Box sx={{ display: 'flex', justifyContent: 'center' }}>
-                  <IconButton 
-                    size="small" 
+                  <IconButton
+                    size="small"
                     color="error"
                     onClick={() => {
-                      // TODO: Implement video deletion
-                      console.log('Delete video:', video.id)
+                      setVideoToDelete({ id: video.id, filename: video.filename })
+                      setDeleteDialogOpen(true)
                     }}
+                    title="Delete video"
                   >
                     <Delete />
                   </IconButton>
@@ -273,7 +281,7 @@ export const ProjectPage = () => {
             </Card>
           </Grid>
         ))}
-        
+
         {videos.length === 0 && (
           <Grid item xs={12}>
             <Box textAlign="center" py={6}>
@@ -288,6 +296,45 @@ export const ProjectPage = () => {
           </Grid>
         )}
       </Grid>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog
+        open={deleteDialogOpen}
+        onClose={() => setDeleteDialogOpen(false)}
+      >
+        <DialogTitle>Delete Video</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Are you sure you want to delete "{videoToDelete?.filename}"?
+            This will also delete all annotations associated with this video.
+            This action cannot be undone.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteDialogOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            onClick={async () => {
+              if (videoToDelete) {
+                try {
+                  await dispatch(deleteVideo(videoToDelete.id))
+                  setDeleteDialogOpen(false)
+                  setVideoToDelete(null)
+                } catch (error) {
+                  console.error('Failed to delete video:', error)
+                  alert('Failed to delete video. Please try again.')
+                }
+              }
+            }}
+            color="error"
+            variant="contained"
+            disabled={loading}
+          >
+            {loading ? 'Deleting...' : 'Delete'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Container>
   )
 }

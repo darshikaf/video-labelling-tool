@@ -1,35 +1,40 @@
-import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { useDispatch, useSelector } from 'react-redux'
+import { clearError, login, register } from '@/store/slices/authSlice'
+import { RootState } from '@/store/store'
 import {
+  Alert,
+  Box,
+  Button,
   Container,
   Paper,
-  TextField,
-  Button,
-  Typography,
-  Box,
-  Alert,
-  Tabs,
   Tab,
+  Tabs,
+  TextField,
+  Typography,
 } from '@mui/material'
-import { RootState } from '@/store/store'
-import { login, register, clearError } from '@/store/slices/authSlice'
+import { useEffect, useState } from 'react'
+import { useDispatch, useSelector } from 'react-redux'
+import { useLocation, useNavigate } from 'react-router-dom'
 
 export const LoginPage = () => {
   const navigate = useNavigate()
+  const location = useLocation()
   const dispatch = useDispatch()
   const { token, loading, error } = useSelector((state: RootState) => state.auth)
-  
+
   const [tabValue, setTabValue] = useState(0)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
 
+  // Get the page user was trying to access (from ProtectedRoute redirect)
+  const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/'
+
   useEffect(() => {
     if (token) {
-      navigate('/')
+      // Redirect to the page they were trying to access, or home
+      navigate(from, { replace: true })
     }
-  }, [token, navigate])
+  }, [token, navigate, from])
 
   useEffect(() => {
     dispatch(clearError())
@@ -37,7 +42,7 @@ export const LoginPage = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    
+
     if (tabValue === 1 && password !== confirmPassword) {
       return
     }
@@ -63,7 +68,7 @@ export const LoginPage = () => {
           <Typography component="h1" variant="h4" align="center" gutterBottom>
             Medical Video Annotation
           </Typography>
-          
+
           <Tabs
             value={tabValue}
             onChange={(_, newValue) => setTabValue(newValue)}
