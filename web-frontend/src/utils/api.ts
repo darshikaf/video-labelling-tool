@@ -1,20 +1,19 @@
+import { Annotation, Project, SAMPredictionRequest, SAMPredictionResponse, User, Video } from '@/types'
 import axios from 'axios'
-import { User, Project, Video, Annotation, SAMPredictionRequest, SAMPredictionResponse } from '@/types'
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-const SAM_SERVICE_URL = import.meta.env.VITE_SAM_SERVICE_URL || 'http://localhost:8001'
-
+// Use relative URLs so Vite proxy handles routing to the backend
+// In Docker: Vite proxies /api -> http://backend:8000
+// In production: nginx/reverse proxy handles this
 const apiClient = axios.create({
-  baseURL: `${API_BASE_URL}/api/v1`,
+  baseURL: '/api/v1',
   timeout: 30000,
 })
 
+// SAM API also goes through the main API proxy now
 const samClient = axios.create({
-  baseURL: SAM_SERVICE_URL,
+  baseURL: '/api/v1',
   timeout: 60000,
 })
-
-// No auth interceptors for prototype
 
 export const authAPI = {
   login: async (email: string, password: string) => {
@@ -52,7 +51,7 @@ export const projectAPI = {
     return response.data
   },
 
-  getProjectCategories: async (projectId: number): Promise<Array<{id: number, name: string, color: string}>> => {
+  getProjectCategories: async (projectId: number): Promise<Array<{ id: number, name: string, color: string }>> => {
     const response = await apiClient.get(`/projects/${projectId}/categories`)
     return response.data
   },
@@ -112,7 +111,7 @@ export const annotationAPI = {
     await apiClient.delete(`/annotations/${annotationId}`)
   },
 
-  getAnnotationMaskUrl: async (annotationId: number): Promise<{mask_url: string}> => {
+  getAnnotationMaskUrl: async (annotationId: number): Promise<{ mask_url: string }> => {
     const response = await apiClient.get(`/annotations/${annotationId}/mask-url`)
     return response.data
   },
@@ -127,25 +126,25 @@ export const samAPI = {
         points: request.points,
         boxes: request.boxes
       })
-      
+
       const response = await apiClient.post('/sam/predict', request, {
         timeout: 60000, // 60 seconds timeout for SAM predictions
         headers: {
           'Content-Type': 'application/json'
         }
       })
-      
+
       console.log('DEBUG: samAPI.predict response received:', {
         status: response.status,
         mask_length: response.data?.mask?.length,
         confidence: response.data?.confidence,
         processing_time: response.data?.processing_time
       })
-      
+
       if (!response.data?.mask) {
         throw new Error('No mask data received from SAM API')
       }
-      
+
       return response.data
     } catch (error: any) {
       console.error('DEBUG: samAPI.predict error:', {
@@ -154,7 +153,7 @@ export const samAPI = {
         status: error.response?.status,
         code: error.code
       })
-      
+
       if (error.code === 'ECONNABORTED') {
         throw new Error('SAM prediction timed out. Please try again.')
       } else if (error.response?.status === 422) {
@@ -162,7 +161,7 @@ export const samAPI = {
       } else if (error.response?.status === 500) {
         throw new Error('SAM prediction failed on server')
       }
-      
+
       throw error
     }
   },
@@ -176,7 +175,7 @@ export const maskAPI = {
         adjustment_type: adjustmentType,
         amount: amount
       })
-      
+
       return response.data.adjusted_mask
     } catch (error: any) {
       console.error('Mask adjustment failed:', error)
