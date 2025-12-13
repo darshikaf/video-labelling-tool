@@ -1,81 +1,239 @@
-from typing import List, Optional
-from pydantic import BaseModel, validator
+"""
+SAM 2 Video Annotation Service Schemas
+
+Request/response schemas for the SAM 2 video annotation API.
+"""
+
 import base64
 import io
+from typing import Dict, List, Optional
+
+import numpy as np
 from PIL import Image
+from pydantic import BaseModel, Field
+
+# ============================================================
+# Session Management
+# ============================================================
 
 
-class PointPrompt(BaseModel):
-    x: float
-    y: float
-    is_positive: bool = True
+class InitializeSessionRequest(BaseModel):
+    """Request to initialize a video annotation session"""
+
+    video_path: str = Field(..., description="Path to the video file")
+    model_size: Optional[str] = Field(
+        default="base_plus",
+        description="SAM 2 model size: tiny, small, base_plus, or large",
+    )
 
 
-class BoxPrompt(BaseModel):
-    x1: float
-    y1: float
-    x2: float
-    y2: float
+class InitializeSessionResponse(BaseModel):
+    """Response after initializing a video annotation session"""
+
+    session_id: str = Field(..., description="Unique session identifier")
+    video_path: str = Field(..., description="Path to the video file")
+    total_frames: int = Field(..., description="Total number of frames in the video")
+    frame_width: int = Field(..., description="Video frame width in pixels")
+    frame_height: int = Field(..., description="Video frame height in pixels")
+    fps: float = Field(..., description="Video frames per second")
 
 
-class SAMPredictionRequest(BaseModel):
-    image_data: str  # Base64 encoded image
-    prompt_type: str  # "point" or "box"
-    points: Optional[List[PointPrompt]] = None
-    boxes: Optional[List[BoxPrompt]] = None
-    cache_key: Optional[str] = None  # For caching image encodings
-    
-    @validator('prompt_type')
-    def validate_prompt_type(cls, v):
-        if v not in ['point', 'box']:
-            raise ValueError('prompt_type must be either "point" or "box"')
-        return v
-    
-    @validator('points')
-    def validate_points(cls, v, values):
-        if values.get('prompt_type') == 'point' and (not v or len(v) == 0):
-            raise ValueError('points required for point prompt type')
-        return v
-    
-    @validator('boxes')
-    def validate_boxes(cls, v, values):
-        if values.get('prompt_type') == 'box' and (not v or len(v) == 0):
-            raise ValueError('boxes required for box prompt type')
-        return v
-    
-    def get_image(self) -> Image.Image:
-        """Decode base64 image data to PIL Image"""
-        try:
-            image_bytes = base64.b64decode(self.image_data)
-            image = Image.open(io.BytesIO(image_bytes))
-            return image.convert('RGB')
-        except Exception as e:
-            raise ValueError(f"Invalid image data: {e}")
+class SessionStatusResponse(BaseModel):
+    """Response with session status information"""
+
+    session_id: str = Field(..., description="Session identifier")
+    video_path: str = Field(..., description="Path to the video file")
+    total_frames: int = Field(..., description="Total frames in video")
+    objects: List[Dict] = Field(..., description="List of tracked objects")
+    created_at: float = Field(..., description="Session creation timestamp")
+    last_accessed: float = Field(..., description="Last access timestamp")
+    idle_time: float = Field(..., description="Seconds since last access")
 
 
-class SAMPredictionResponse(BaseModel):
-    mask: str  # Base64 encoded binary mask
-    confidence: float
-    processing_time: float
-    cached: bool = False
-    
-    @staticmethod
-    def encode_mask(mask_array) -> str:
-        """Encode numpy mask array to base64 string"""
-        import numpy as np
-        if mask_array.dtype != np.uint8:
-            mask_array = (mask_array * 255).astype(np.uint8)
-        
-        # Convert to PIL Image and then to base64
-        mask_image = Image.fromarray(mask_array, mode='L')
-        buffer = io.BytesIO()
-        mask_image.save(buffer, format='PNG')
-        mask_b64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
-        return mask_b64
+class CloseSessionRequest(BaseModel):
+    """Request to close a session"""
+
+    session_id: str = Field(..., description="Session identifier")
+
+
+class CloseSessionResponse(BaseModel):
+    """Response after closing a session"""
+
+    message: str = Field(..., description="Status message")
+    session_id: str = Field(..., description="Closed session ID")
+
+
+# ============================================================
+# Object Tracking
+# ============================================================
+
+
+class AddObjectRequest(BaseModel):
+    """Request to add a new tracked object with point prompts"""
+
+    session_id: str = Field(..., description="Session identifier")
+    frame_idx: int = Field(..., description="Frame index to add object on")
+    object_id: int = Field(..., description="Unique ID for this object")
+    points: List[List[float]] = Field(
+        ..., description="List of [x, y] point coordinates"
+    )
+    labels: List[int] = Field(
+        ..., description="Point labels (1=positive/include, 0=negative/exclude)"
+    )
+    name: Optional[str] = Field(default="", description="Object name (e.g., 'Forceps')")
+    category: Optional[str] = Field(
+        default="", description="Object category (e.g., 'Instrument')"
+    )
+
+
+class AddObjectWithBoxRequest(BaseModel):
+    """Request to add a new tracked object with bounding box"""
+
+    session_id: str = Field(..., description="Session identifier")
+    frame_idx: int = Field(..., description="Frame index to add object on")
+    object_id: int = Field(..., description="Unique ID for this object")
+    box: List[float] = Field(
+        ..., description="Bounding box as [x1, y1, x2, y2]", min_length=4, max_length=4
+    )
+    name: Optional[str] = Field(default="", description="Object name")
+    category: Optional[str] = Field(default="", description="Object category")
+
+
+class AddObjectResponse(BaseModel):
+    """Response after adding an object"""
+
+    object_id: int = Field(..., description="Object ID")
+    name: str = Field(..., description="Object name")
+    category: str = Field(..., description="Object category")
+    color: List[int] = Field(..., description="RGB color for visualization")
+    frame_idx: int = Field(..., description="Frame where object was added")
+    mask: str = Field(..., description="Base64 encoded mask for the initial frame")
+
+
+# ============================================================
+# Propagation
+# ============================================================
+
+
+class PropagateRequest(BaseModel):
+    """Request to propagate masks across video"""
+
+    session_id: str = Field(..., description="Session identifier")
+    start_frame: Optional[int] = Field(
+        default=None, description="Start frame for propagation"
+    )
+    end_frame: Optional[int] = Field(
+        default=None, description="End frame for propagation"
+    )
+    direction: Optional[str] = Field(
+        default="both",
+        description="Propagation direction: 'forward', 'backward', or 'both'",
+    )
+
+
+class FrameMask(BaseModel):
+    """Mask data for a single frame"""
+
+    frame_idx: int = Field(..., description="Frame index")
+    masks: Dict[int, str] = Field(
+        ..., description="Object ID -> Base64 encoded mask mapping"
+    )
+
+
+class PropagateResponse(BaseModel):
+    """Response after propagating masks"""
+
+    session_id: str = Field(..., description="Session identifier")
+    total_frames: int = Field(..., description="Total frames processed")
+    frames: List[FrameMask] = Field(..., description="List of frame masks")
+
+
+# ============================================================
+# Refinement
+# ============================================================
+
+
+class RefineRequest(BaseModel):
+    """Request to refine a mask on a specific frame"""
+
+    session_id: str = Field(..., description="Session identifier")
+    frame_idx: int = Field(..., description="Frame index to refine")
+    object_id: int = Field(..., description="Object ID to refine")
+    points: List[List[float]] = Field(
+        ..., description="List of [x, y] refinement points"
+    )
+    labels: List[int] = Field(..., description="Point labels (1=positive, 0=negative)")
+
+
+class RefineResponse(BaseModel):
+    """Response after refining a mask"""
+
+    object_id: int = Field(..., description="Object ID")
+    frame_idx: int = Field(..., description="Frame index")
+    mask: str = Field(..., description="Base64 encoded refined mask")
+
+
+# ============================================================
+# Frame Masks
+# ============================================================
+
+
+class GetFrameMasksRequest(BaseModel):
+    """Request to get masks for a specific frame"""
+
+    session_id: str = Field(..., description="Session identifier")
+    frame_idx: int = Field(..., description="Frame index")
+
+
+class GetFrameMasksResponse(BaseModel):
+    """Response with masks for a specific frame"""
+
+    frame_idx: int = Field(..., description="Frame index")
+    masks: Dict[int, str] = Field(
+        ..., description="Object ID -> Base64 encoded mask mapping"
+    )
+
+
+# ============================================================
+# Health & Status
+# ============================================================
 
 
 class HealthResponse(BaseModel):
+    """Health check response"""
+
     message: str
     status: str
     model_loaded: bool
     timestamp: float
+    active_sessions: Optional[int] = None
+
+
+class ErrorResponse(BaseModel):
+    """Error response"""
+
+    error: str = Field(..., description="Error message")
+    detail: Optional[str] = Field(default=None, description="Detailed error info")
+
+
+# ============================================================
+# Utility Functions
+# ============================================================
+
+
+def encode_mask(mask_array: np.ndarray) -> str:
+    """Encode numpy mask array to base64 PNG string"""
+    if mask_array.dtype != np.uint8:
+        mask_array = (mask_array * 255).astype(np.uint8)
+
+    mask_image = Image.fromarray(mask_array, mode="L")
+    buffer = io.BytesIO()
+    mask_image.save(buffer, format="PNG")
+    return base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+
+def decode_mask(mask_b64: str) -> np.ndarray:
+    """Decode base64 PNG string to numpy mask array"""
+    mask_bytes = base64.b64decode(mask_b64)
+    mask_image = Image.open(io.BytesIO(mask_bytes))
+    return np.array(mask_image)

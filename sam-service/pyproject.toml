@@ -1,26 +1,62 @@
 [project]
 name = "sam-service"
-version = "0.1.0"
-description = "SAM service for video labelling tool"
+version = "0.2.0"
+description = "SAM 2 video segmentation service for video annotation tool"
 requires-python = ">=3.11"
 dependencies = [
+    # Web framework
     "fastapi>=0.104.1,<1.0",
     "uvicorn[standard]>=0.24.0,<1.0",
-    "ultralytics>=8.2.0,<9.0",
-    "opencv-python>=4.8.1,<5.0",
-    "numpy>=1.24.3,<2.0",
-    "pillow>=10.1.0,<11.0",
-    "redis>=5.0.1,<6.0",
     "python-multipart>=0.0.6,<1.0",
     "pydantic>=2.5.0,<3.0",
-    "torch>=2.1.1,<3.0",
-    "torchvision>=0.16.1,<1.0",
+
+    # Redis for session/cache management
+    "redis>=5.0.1,<6.0",
+
+    # Image/Video processing
+    "opencv-python>=4.8.0,<5.0",
+    "numpy>=1.24.0,<2.0",
+    "pillow>=10.1.0,<11.0",
+    "av>=12.0.0",
+
+    # PyTorch (CPU by default, override with CUDA index for GPU)
+    "torch>=2.1.0",
+    "torchvision>=0.16.0",
+
+    # SAM 2 from Meta
+    "sam-2 @ git+https://github.com/facebookresearch/segment-anything-2.git",
+
+    # Progress bars
+    "tqdm>=4.65.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "httpx>=0.25.0",
+    "ruff>=0.1.0",
 ]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.hatch.build.targets.wheel]
 packages = ["core"]
 include = ["*.py"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
