@@ -10,10 +10,15 @@ services:
       - ./web-frontend:/app
       - /app/node_modules
     environment:
-      - VITE_API_URL=http://localhost:8000
+      - VITE_API_URL=http://localhost:8888
+      - VITE_BACKEND_URL=http://backend:8000
+      - VITE_SAM_URL=http://sam-service:8001
+      - CHOKIDAR_USEPOLLING=true
     depends_on:
       - backend
     restart: unless-stopped
+    networks:
+      - app-network
 
   backend:
     build:
@@ -22,7 +27,7 @@ services:
       args:
         - TARGETPLATFORM=${TARGETPLATFORM:-linux/amd64}
     ports:
-      - "8000:8000"
+      - "8888:8000"
     volumes:
       - ./web-backend:/app
       - ./uploads:/app/uploads
@@ -34,6 +39,7 @@ services:
       - MINIO_ACCESS_KEY=minioadmin
       - MINIO_SECRET_KEY=minioadmin
       - MINIO_BUCKET=video-annotations
+      - SAM_SERVICE_URL=http://sam-service:8001
     depends_on:
       database:
         condition: service_healthy
@@ -42,6 +48,8 @@ services:
       minio:
         condition: service_healthy
     restart: unless-stopped
+    networks:
+      - app-network
 
   sam-service:
     build:
@@ -60,6 +68,8 @@ services:
       redis:
         condition: service_started
     restart: unless-stopped
+    networks:
+      - app-network
 
   database:
     image: postgres:15-alpine
@@ -73,11 +83,13 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./web-backend/migrations:/docker-entrypoint-initdb.d
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
       interval: 10s
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    networks:
+      - app-network
 
   redis:
     image: redis:7-alpine
@@ -86,11 +98,13 @@ services:
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 10s
       timeout: 5s
       retries: 3
     restart: unless-stopped
+    networks:
+      - app-network
 
   minio:
     image: minio/minio:latest
@@ -104,11 +118,17 @@ services:
     volumes:
       - minio_data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
       interval: 30s
       timeout: 20s
       retries: 3
     restart: unless-stopped
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
 
 volumes:
   postgres_data:
