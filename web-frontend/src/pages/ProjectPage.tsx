@@ -1,3 +1,5 @@
+import { CategoryManager } from '@/components/settings/CategoryManager'
+import { TemplateManager } from '@/components/settings/TemplateManager'
 import { fetchProject } from '@/store/slices/projectSlice'
 import { deleteVideo, fetchVideos, uploadVideo } from '@/store/slices/videoSlice'
 import { RootState } from '@/store/store'
@@ -5,6 +7,7 @@ import {
   CloudUpload,
   Delete,
   PlayArrow,
+  Settings,
   VideoFile
 } from '@mui/icons-material'
 import {
@@ -23,6 +26,8 @@ import {
   IconButton,
   LinearProgress,
   Paper,
+  Tab,
+  Tabs,
   Typography
 } from '@mui/material'
 import React, { useEffect, useRef, useState } from 'react'
@@ -41,6 +46,7 @@ export const ProjectPage = () => {
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [videoToDelete, setVideoToDelete] = useState<{ id: number; filename: string } | null>(null)
+  const [activeTab, setActiveTab] = useState(0)
 
   useEffect(() => {
     if (projectId) {
@@ -146,7 +152,7 @@ export const ProjectPage = () => {
 
   return (
     <Container maxWidth="lg" sx={{ mt: 2 }}>
-      <Box sx={{ mb: 4 }}>
+      <Box sx={{ mb: 3 }}>
         <Typography variant="h4" gutterBottom>
           {currentProject.name}
         </Typography>
@@ -157,7 +163,32 @@ export const ProjectPage = () => {
         )}
       </Box>
 
-      {/* Video Upload Area */}
+      {/* Tab Navigation */}
+      <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
+        <Tabs value={activeTab} onChange={(_, newValue) => setActiveTab(newValue)}>
+          <Tab icon={<VideoFile />} iconPosition="start" label="Videos" />
+          <Tab icon={<Settings />} iconPosition="start" label="Settings" />
+        </Tabs>
+      </Box>
+
+      {/* Settings Tab */}
+      {activeTab === 1 && (
+        <Box sx={{ mb: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <CategoryManager projectId={parseInt(projectId || '0')} />
+          <TemplateManager
+            projectId={parseInt(projectId || '0')}
+            onTemplateApplied={() => {
+              // Refresh page to show new categories
+              window.location.reload()
+            }}
+          />
+        </Box>
+      )}
+
+      {/* Videos Tab */}
+      {activeTab === 0 && (
+        <>
+        {/* Video Upload Area */}
       <Paper sx={{ p: 3, mb: 4, backgroundColor: 'grey.50' }}>
         <Typography variant="h6" gutterBottom>
           Upload Video
@@ -296,6 +327,8 @@ export const ProjectPage = () => {
           </Grid>
         )}
       </Grid>
+      </>
+      )}
 
       {/* Delete Confirmation Dialog */}
       <Dialog

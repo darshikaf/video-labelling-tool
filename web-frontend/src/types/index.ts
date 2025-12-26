@@ -60,8 +60,8 @@ export interface Annotation {
 export interface SAMPredictionRequest {
   image_data: string
   prompt_type: 'point' | 'box'
-  points?: Array<{x: number, y: number, is_positive: boolean}>
-  boxes?: Array<{x1: number, y1: number, x2: number, y2: number}>
+  points?: Array<{ x: number, y: number, is_positive: boolean }>
+  boxes?: Array<{ x1: number, y1: number, x2: number, y2: number }>
 }
 
 export interface SAMPredictionResponse {
@@ -74,4 +74,86 @@ export interface SAMPredictionResponse {
 export interface PolygonPoint {
   x: number
   y: number
+}
+
+// ============================================================
+// SAM 2 Video Annotation Types
+// ============================================================
+
+export interface SAM2Session {
+  session_id: string
+  video_path: string
+  total_frames: number
+  frame_width: number
+  frame_height: number
+  fps: number
+}
+
+export interface SAM2TrackedObject {
+  object_id: number
+  name: string
+  category: string
+  color: [number, number, number]
+  frames_with_masks: number
+}
+
+export interface SAM2SessionStatus {
+  session_id: string
+  video_path: string
+  total_frames: number
+  objects: SAM2TrackedObject[]
+  created_at: number
+  last_accessed: number
+  idle_time: number
+}
+
+export interface SAM2AddObjectRequest {
+  session_id: string
+  frame_idx: number
+  object_id: number
+  points: [number, number][]
+  labels: number[]
+  name?: string
+  category?: string
+}
+
+export interface SAM2AddObjectResponse {
+  object_id: number
+  name: string
+  category: string
+  color: number[]
+  frame_idx: number
+  mask: string  // Base64 encoded PNG
+}
+
+export interface SAM2PropagateRequest {
+  session_id: string
+  start_frame?: number
+  end_frame?: number
+  direction?: 'forward' | 'backward' | 'both'
+}
+
+export interface SAM2FrameMask {
+  frame_idx: number
+  masks: Record<number, string>  // object_id -> base64 mask
+}
+
+export interface SAM2PropagateResponse {
+  session_id: string
+  total_frames: number
+  frames: SAM2FrameMask[]
+}
+
+export interface SAM2RefineRequest {
+  session_id: string
+  frame_idx: number
+  object_id: number
+  points: [number, number][]
+  labels: number[]
+}
+
+export interface SAM2RefineResponse {
+  object_id: number
+  frame_idx: number
+  mask: string
 }

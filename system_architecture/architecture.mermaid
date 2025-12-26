@@ -1,50 +1,108 @@
+%% Video Labeling Tool - System Architecture
+%% Updated: December 2024
+
 graph TD
-    subgraph "Frontend"
-        A[Video Player] --> B[Interactive Canvas]
-        B --> C[Annotation Tools]
-        C -->|Prompts| B
+    subgraph "Frontend (React + TypeScript)"
+        A[Video Player<br/>VideoPlayer.tsx] --> B[Annotation Canvas<br/>AnnotationCanvas.tsx]
+        B --> C[Polygon Editor<br/>PolygonEditor.tsx]
+        SAM2UI[SAM2 Controls<br/>SAM2Controls.tsx] --> B
         D[Timeline Controller] --> A
-        E[Export UI] --> F[Project Management]
+        E[Export Dialog<br/>ExportDialog.tsx] --> F[Dashboard<br/>DashboardPage.tsx]
+
+        subgraph "Redux Store"
+            S1[annotationSlice]
+            S2[sam2Slice]
+            S3[videoSlice]
+            S4[projectSlice]
+        end
+
+        SAM2UI --> S2
+        B --> S1
+        A --> S3
     end
 
-    subgraph "Backend Services"
-        G[API Gateway]
-        H[Authentication Service]
-        I[Video Processing Service]
-        J[SAM Inference Engine]
-        K[Temporal Tracking Service]
+    subgraph "Web Backend (FastAPI)"
+        G[API Gateway<br/>web-backend:8000]
+        H[Auth Service]
+        I[Video Service]
+        J[Annotation Service]
         L[Export Service]
     end
 
+    subgraph "SAM 2 Service (FastAPI)"
+        SAM2[SAM 2 Video Predictor<br/>sam-service:8002]
+        SAM2_SESSION[Session Manager]
+        SAM2_MODEL[SAM 2 Model<br/>base_plus / tiny]
+
+        SAM2 --> SAM2_SESSION
+        SAM2 --> SAM2_MODEL
+    end
+
     subgraph "Data Storage"
-        M[Video Database]
-        N[Annotation Database]
-        O[User Projects]
+        M[(PostgreSQL<br/>Videos & Projects)]
+        N[(MinIO<br/>Video Files)]
+        R[(Redis<br/>Sessions & Cache)]
     end
 
     %% Frontend to Backend connections
-    B -->|Prompt requests| G
-    F -->|Project data| G
-    E -->|Export request| G
+    B -->|"Annotations"| G
+    SAM2UI -->|"SAM 2 API calls"| SAM2
+    F -->|"Project CRUD"| G
+    E -->|"Export request"| G
 
     %% Backend internal connections
     G --> H
-    H --> I
-    H --> J
-    H --> K
-    H --> L
-    I -->|Extracted frames| J
-    J -->|Frame masks| K
-    K -->|Temporal masks| L
+    G --> I
+    G --> J
+    G --> L
+
+    %% SAM 2 Service endpoints
+    SAM2 -->|"/initialize"| SAM2_SESSION
+    SAM2 -->|"/add-object"| SAM2_MODEL
+    SAM2 -->|"/propagate"| SAM2_MODEL
+    SAM2 -->|"/refine"| SAM2_MODEL
 
     %% Backend to Storage connections
-    I <-->|Video data| M
-    J <-->|Segmentation masks| N
-    K <-->|Tracking data| N
-    L -->|Export data| O
-    F <-->|User data| O
+    I <-->|"Video metadata"| M
+    I <-->|"Video files"| N
+    J <-->|"Annotations"| M
+    SAM2_SESSION <-->|"Session state"| R
+    L -->|"Export files"| N
 
-    %% Data flow notations
-    A -.->|"Frame display"| B
-    J -.->|"Segmentation results"| B
-    K -.->|"Object tracking"| B
+    %% Real-time data flows
+    SAM2 -.->|"Masks (base64)"| SAM2UI
+    SAM2UI -.->|"Display masks"| B
+
+%% ========================================
+%% SAM 2 Session Flow
+%% ========================================
+
+graph LR
+    subgraph "SAM 2 Workflow"
+        INIT[1. Initialize Session<br/>Load video frames] --> ADD[2. Add Object<br/>Click on frame]
+        ADD --> MASK[3. Generate Mask<br/>For clicked frame]
+        MASK --> PROP[4. Propagate<br/>To all frames]
+        PROP --> REFINE[5. Refine<br/>Correct errors]
+        REFINE --> SAVE[6. Save<br/>To database]
+    end
+
+%% ========================================
+%% Docker Services
+%% ========================================
+
+graph TB
+    subgraph "Docker Compose Services"
+        DC_FE[web-frontend<br/>:3000<br/>React + Vite]
+        DC_BE[web-backend<br/>:8000<br/>FastAPI]
+        DC_SAM[sam-service<br/>:8002<br/>SAM 2 + FastAPI]
+        DC_DB[(postgres<br/>:5432)]
+        DC_REDIS[(redis<br/>:6379)]
+        DC_MINIO[(minio<br/>:9000)]
+
+        DC_FE --> DC_BE
+        DC_FE --> DC_SAM
+        DC_BE --> DC_DB
+        DC_BE --> DC_REDIS
+        DC_BE --> DC_MINIO
+        DC_SAM --> DC_REDIS
+    end

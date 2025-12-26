@@ -167,8 +167,24 @@ artifacts/
 .DS_Store
 .vscode
 
+# Node.js
+node_modules/
+
+# Uploaded files / test videos
+uploads/
+*.mov
+
 # model checkpoint
 *.pt
 
 /test
 /input
+
+test_masks/
+
+# Ignore video files in docs (keep markdown)
+docs/*.mov
+docs/*.mp4
+
+# Ignore export files
+exports/

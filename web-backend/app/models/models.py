@@ -103,3 +103,31 @@ class Annotation(Base):
 
     frame = relationship("Frame", back_populates="annotations")
     category = relationship("Category", back_populates="annotations")
+
+
+class CategoryTemplate(Base):
+    """Global category templates that can be applied to any project"""
+    __tablename__ = "category_templates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)  # e.g., "Surgical Instruments"
+    description = Column(String, nullable=True)
+    is_system = Column(Boolean, default=False)  # True for built-in presets
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)  # Null for system templates
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    creator = relationship("User", backref="category_templates")
+    items = relationship("TemplateCategoryItem", back_populates="template", cascade="all, delete-orphan")
+
+
+class TemplateCategoryItem(Base):
+    """Individual category items within a template"""
+    __tablename__ = "template_category_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    template_id = Column(Integer, ForeignKey("category_templates.id"), nullable=False)
+    name = Column(String, nullable=False)
+    color = Column(String, nullable=False)
+    order = Column(Integer, default=0)  # For ordering categories in UI
+
+    template = relationship("CategoryTemplate", back_populates="items")

@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import auth, projects, videos, annotations, sam, masks
+from app.api.v1.endpoints import auth, projects, videos, annotations, sam, masks, templates
 from app.routers import export
 
 api_router = APIRouter()
@@ -12,4 +12,5 @@ api_router.include_router(annotations.router, prefix="/annotations", tags=["anno
 api_router.include_router(annotations.router, prefix="", tags=["annotations"])  # For video-based annotation routes
 api_router.include_router(sam.router, prefix="/sam", tags=["sam"])
 api_router.include_router(masks.router, prefix="/masks", tags=["masks"])
+api_router.include_router(templates.router, prefix="/templates", tags=["templates"])
 api_router.include_router(export.router, prefix="/export", tags=["export"])

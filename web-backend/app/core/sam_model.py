@@ -19,22 +19,42 @@ class SAMModel:
     Exact copy of working Streamlit implementation
     """
 
-    def __init__(self, model_type="vit_b"):
+    def __init__(self, model_type="vit_b", lazy_load=True):
         """
-        Initialize the SAM model
+        Initialize the SAM model with optional lazy loading
 
         Args:
             model_type (str): Model type identifier
+            lazy_load (bool): If True, don't load model until first use (saves memory)
         """
         self.model_type = model_type
-        # Load the SAM model
-        model_path = Path("/app/models/sam_b.pt")
-        model_dir = model_path.parent
+        self.model_path = Path("/app/models/sam_b.pt")
+        self.model = None
+        self.lazy_load = lazy_load
+
+        # Track interaction state
+        self.points = []
+        self.labels = []
+        self.contours = None
+
+        # Only load immediately if lazy_load is False
+        if not lazy_load:
+            self._load_model()
+        else:
+            logger.info("SAM model initialized in lazy-load mode (won't load until first use)")
+
+    def _load_model(self):
+        """Load the SAM model (called on first use if lazy loading)"""
+        if self.model is not None:
+            return  # Already loaded
+
+        logger.info("Loading SAM model...")
+        model_dir = self.model_path.parent
 
         # Create models directory if it doesn't exist
         model_dir.mkdir(exist_ok=True, parents=True)
 
-        if not model_path.exists():
+        if not self.model_path.exists():
             try:
                 logger.info("Model file not found. Attempting to download...")
                 import torch
@@ -42,9 +62,9 @@ class SAMModel:
                 # Download model from Ultralytics
                 torch.hub.download_url_to_file(
                     "https://github.com/ultralytics/assets/releases/download/v8.2.0/sam_b.pt",
-                    str(model_path),
+                    str(self.model_path),
                 )
-                logger.info(f"Model downloaded successfully to {model_path}")
+                logger.info(f"Model downloaded successfully to {self.model_path}")
             except Exception as e:
                 logger.error(f"Failed to download model: {e}")
                 logger.warning("Using simulation mode.")
@@ -52,17 +72,12 @@ class SAMModel:
                 return
 
         try:
-            self.model = SAM(model_path)
-            logger.info(f"SAM model loaded successfully from {model_path}")
+            self.model = SAM(self.model_path)
+            logger.info(f"SAM model loaded successfully from {self.model_path}")
         except Exception as e:
             logger.error(f"Error loading model: {e}")
             logger.warning("Falling back to simulation mode.")
             self.model = None
-
-        # Track interaction state
-        self.points = []
-        self.labels = []
-        self.contours = None
 
     def _add_point(self, x: int, y: int, label: int = 1):
         """
@@ -87,6 +102,10 @@ class SAMModel:
         Returns:
             Optional[List[Dict]]: Segmentation results
         """
+        # Lazy load model on first use
+        if self.model is None and self.lazy_load:
+            self._load_model()
+
         if self.model is None:
             return None
 
