@@ -181,4 +181,7 @@ uploads/
 /input
 
 test_masks/
-docs/
+
+# Ignore video files in docs (keep markdown)
+docs/*.mov
+docs/*.mp4
