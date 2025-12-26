@@ -8,19 +8,26 @@ import { fetchFrame, fetchVideo, setCurrentFrame } from '@/store/slices/videoSli
 import { AppDispatch, RootState } from '@/store/store'
 import { PolygonPoint } from '@/types'
 import { annotationAPI, projectAPI } from '@/utils/api'
-import { FileDownload } from '@mui/icons-material'
+import { Add, FileDownload } from '@mui/icons-material'
 import {
   Box,
   Button,
   Chip,
   CircularProgress,
   Container,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Divider,
   FormControl,
   Grid,
   InputLabel,
+  ListItemIcon,
   MenuItem,
   Paper,
   Select,
+  TextField,
   Typography
 } from '@mui/material'
 import { useEffect, useRef, useState } from 'react'
@@ -56,6 +63,11 @@ export const AnnotationPage = () => {
   const [selectedCategory, setSelectedCategory] = useState('')
   const [categories, setCategories] = useState<Array<{ id: number, name: string, color: string }>>([])
   const [samLoading, setSamLoading] = useState(false)
+
+  // Quick-add category state
+  const [quickAddOpen, setQuickAddOpen] = useState(false)
+  const [quickAddName, setQuickAddName] = useState('')
+  const [quickAddLoading, setQuickAddLoading] = useState(false)
   const [editingMode, setEditingMode] = useState<'sam' | 'polygon'>('sam')
   const [polygonPoints, setPolygonPoints] = useState<any[]>([])
   const [exportDialogOpen, setExportDialogOpen] = useState(false)
@@ -388,6 +400,26 @@ export const AnnotationPage = () => {
     } catch (error) {
       console.error('DEBUG: SAM prediction failed:', error)
       setSamLoading(false)
+    }
+  }
+
+  // Quick-add category handler
+  const handleQuickAddCategory = async () => {
+    if (!quickAddName.trim() || !projectId) {
+      return
+    }
+
+    setQuickAddLoading(true)
+    try {
+      const newCategory = await projectAPI.createCategory(parseInt(projectId), quickAddName.trim())
+      setCategories(prev => [...prev, newCategory])
+      setSelectedCategory(newCategory.name)
+      setQuickAddOpen(false)
+      setQuickAddName('')
+    } catch (err: any) {
+      alert(err.response?.data?.detail || 'Failed to create category')
+    } finally {
+      setQuickAddLoading(false)
     }
   }
 
@@ -940,7 +972,13 @@ export const AnnotationPage = () => {
                   <Select
                     value={selectedCategory}
                     label="Category"
-                    onChange={(e) => setSelectedCategory(e.target.value)}
+                    onChange={(e) => {
+                      if (e.target.value === '__add_new__') {
+                        setQuickAddOpen(true)
+                      } else {
+                        setSelectedCategory(e.target.value)
+                      }
+                    }}
                   >
                     {categories.map((category) => (
                       <MenuItem key={category.id} value={category.name}>
@@ -957,6 +995,13 @@ export const AnnotationPage = () => {
                         </Box>
                       </MenuItem>
                     ))}
+                    <Divider />
+                    <MenuItem value="__add_new__">
+                      <ListItemIcon>
+                        <Add fontSize="small" />
+                      </ListItemIcon>
+                      Add New Category...
+                    </MenuItem>
                   </Select>
                 </FormControl>
               </Grid>
@@ -1071,6 +1116,47 @@ export const AnnotationPage = () => {
         </Grid>
 
       </Grid>
+
+      {/* Quick Add Category Dialog */}
+      <Dialog
+        open={quickAddOpen}
+        onClose={() => {
+          setQuickAddOpen(false)
+          setQuickAddName('')
+        }}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Add New Category</DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            margin="dense"
+            label="Category Name"
+            fullWidth
+            variant="outlined"
+            value={quickAddName}
+            onChange={(e) => setQuickAddName(e.target.value)}
+            onKeyPress={(e) => e.key === 'Enter' && handleQuickAddCategory()}
+            placeholder="e.g., Forceps, Liver, Scissors"
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            setQuickAddOpen(false)
+            setQuickAddName('')
+          }}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleQuickAddCategory}
+            variant="contained"
+            disabled={!quickAddName.trim() || quickAddLoading}
+          >
+            {quickAddLoading ? 'Adding...' : 'Add'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Export Dialog */}
       <ExportDialog

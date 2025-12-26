@@ -14,7 +14,7 @@ class UserCreate(UserBase):
 class User(UserBase):
     id: int
     created_at: datetime
-    
+
     model_config = {"from_attributes": True}
 
 
@@ -31,13 +31,13 @@ class ProjectCreate(ProjectBase):
 class Project(BaseModel):
     id: int
     name: str  # System-generated unique name
-    display_name: str  # User-provided display name  
+    display_name: str  # User-provided display name
     description: Optional[str] = None
     annotation_format: str = 'YOLO'
     owner_id: int
     created_at: datetime
     updated_at: Optional[datetime]
-    
+
     model_config = {"from_attributes": True}
 
 
@@ -54,7 +54,7 @@ class Category(CategoryBase):
     id: int
     project_id: int
     created_at: datetime
-    
+
     model_config = {"from_attributes": True}
 
 
@@ -83,7 +83,7 @@ class Video(VideoBase):
     total_frames: Optional[int]
     created_at: datetime
     updated_at: Optional[datetime]
-    
+
     model_config = {"from_attributes": True}
 
 
@@ -101,7 +101,7 @@ class Frame(FrameBase):
     id: int
     video_id: int
     created_at: datetime
-    
+
     model_config = {"from_attributes": True}
 
 
@@ -128,7 +128,7 @@ class Annotation(AnnotationBase):
     is_reviewed: bool
     created_at: datetime
     updated_at: Optional[datetime]
-    
+
     model_config = {"from_attributes": True}
 
 
@@ -139,3 +139,44 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     email: Optional[str] = None
+
+
+# Template schemas
+class TemplateCategoryItemBase(BaseModel):
+    name: str
+    color: str
+    order: Optional[int] = 0
+
+
+class TemplateCategoryItemCreate(TemplateCategoryItemBase):
+    pass
+
+
+class TemplateCategoryItem(TemplateCategoryItemBase):
+    id: int
+    template_id: int
+
+    model_config = {"from_attributes": True}
+
+
+class CategoryTemplateBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+
+class CategoryTemplateCreate(CategoryTemplateBase):
+    items: List[TemplateCategoryItemCreate]
+
+
+class CategoryTemplate(CategoryTemplateBase):
+    id: int
+    is_system: bool
+    created_by: Optional[int] = None
+    created_at: datetime
+    items: List[TemplateCategoryItem] = []
+
+    model_config = {"from_attributes": True}
+
+
+class ApplyTemplateRequest(BaseModel):
+    merge: bool = False  # If True, merge with existing categories; if False, replace

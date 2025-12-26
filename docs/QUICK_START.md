@@ -275,8 +275,19 @@ docker-compose down
    - Scrub the timeline to see masks on different frames
    - Object list shows how many frames have masks
 
-9. **Close Session** when done:
-   - Click "Close Session" or toggle SAM 2 Mode off
+9. **Save Annotations to Database**:
+   - Click "Save All to Database" button
+   - Progress bar shows saving status
+   - This stores all masks in the database for export
+
+10. **Export Annotations**:
+    - Open the Export dialog
+    - Select YOLO or COCO format
+    - Choose the video to export
+    - Download the zip file with polygon annotations
+
+11. **Close Session** when done:
+    - Click "Close Session" or toggle SAM 2 Mode off
 
 ### SAM 2 Frontend Components
 
@@ -301,6 +312,16 @@ docker-compose down
 - Check browser console for errors
 - Verify the canvas is properly rendering
 - Try refreshing the page
+
+**Export shows empty files**:
+- Ensure you clicked "Save All to Database" BEFORE exporting
+- Check backend logs for any export errors
+- Verify the correct video is selected for export
+
+**"Save All" returns errors**:
+- Check if the video ID is valid
+- Ensure category names are set for objects
+- Review browser console for detailed error messages
 
 ---
 

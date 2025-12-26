@@ -106,6 +106,65 @@ export const projectAPI = {
     const response = await apiClient.get(`/projects/${projectId}/categories`)
     return response.data
   },
+
+  createCategory: async (projectId: number, name: string, color?: string): Promise<{ id: number, name: string, color: string }> => {
+    const response = await apiClient.post(`/projects/${projectId}/categories`, { name, color })
+    return response.data
+  },
+
+  updateCategory: async (projectId: number, categoryId: number, name: string, color?: string): Promise<{ id: number, name: string, color: string }> => {
+    const response = await apiClient.put(`/projects/${projectId}/categories/${categoryId}`, { name, color })
+    return response.data
+  },
+
+  deleteCategory: async (projectId: number, categoryId: number, force: boolean = false): Promise<{ message: string, annotations_deleted: number }> => {
+    const response = await apiClient.delete(`/projects/${projectId}/categories/${categoryId}`, { params: { force } })
+    return response.data
+  },
+}
+
+// Template types
+export interface TemplateCategoryItem {
+  id?: number
+  name: string
+  color: string
+  order?: number
+}
+
+export interface CategoryTemplate {
+  id: number
+  name: string
+  description?: string
+  is_system: boolean
+  created_by?: number
+  items: TemplateCategoryItem[]
+}
+
+export const templateAPI = {
+  getTemplates: async (): Promise<CategoryTemplate[]> => {
+    const response = await apiClient.get('/templates/')
+    return response.data
+  },
+
+  getTemplate: async (templateId: number): Promise<CategoryTemplate> => {
+    const response = await apiClient.get(`/templates/${templateId}`)
+    return response.data
+  },
+
+  createTemplate: async (name: string, description: string | null, items: TemplateCategoryItem[]): Promise<CategoryTemplate> => {
+    const response = await apiClient.post('/templates/', { name, description, items })
+    return response.data
+  },
+
+  deleteTemplate: async (templateId: number): Promise<{ message: string }> => {
+    const response = await apiClient.delete(`/templates/${templateId}`)
+    return response.data
+  },
+
+  applyTemplate: async (templateId: number, projectId: number, merge: boolean = false): Promise<{ message: string, categories_added: number, categories_skipped: number }> => {
+    const response = await apiClient.post(`/templates/${templateId}/apply/${projectId}`, { merge })
+    return response.data
+  },
 }
 
 export const videoAPI = {

@@ -141,18 +141,56 @@ Manual Test Steps:
 
 ---
 
-## Milestone 5: Refinement & Multi-Frame Editing
+## Milestone 5: Mask Refinement & Polygon Editing
 
-**Goal**: Correct mask on a specific frame, re-propagate
-**Test**: Mask drifts on frame 50 → add refinement click → mask corrects
+**Goal**: Refine mask boundaries before and after propagation using both click-based and polygon editing methods
+**Test**: Edit polygon boundary on initial mask → propagate with refined mask → correct drifted masks on later frames
+
+### Part A: Pre-Propagation Polygon Editing
+
+Allow users to manually edit the mask boundary using draggable polygon nodes **before** propagation starts.
 
 | Task | Description | Status |
 |------|-------------|--------|
-| 5.1 | Add `/refine` endpoint (add points to specific frame) | ⬜ |
-| 5.2 | Frontend: click on any frame to add refinement point | ⬜ |
-| 5.3 | Re-propagate from refinement point (forward and/or backward) | ⬜ |
+| 5.1 | Add "Edit Boundary" button in SAM2Controls (appears after initial mask) | ⬜ |
+| 5.2 | Integrate PolygonEditor component with SAM2 workflow | ⬜ |
+| 5.3 | Show polygon overlay with draggable nodes on mask boundary | ⬜ |
+| 5.4 | Convert edited polygon back to mask for propagation | ⬜ |
+| 5.5 | Update SAM2 state to use refined mask instead of original | ⬜ |
 
-### ✅ Test Checkpoint
+**Existing Components:**
+- `PolygonEditor.tsx` - Already has mask-to-polygon conversion, node dragging, polygon-to-mask conversion
+- Needs integration with SAM2Controls and state management
+
+### Part B: Click-Based Refinement (Post-Propagation)
+
+Allow users to add positive/negative clicks to correct drifted masks on any frame.
+
+| Task | Description | Status |
+|------|-------------|--------|
+| 5.6 | Expose `/refine` endpoint in UI (backend already exists) | ⬜ |
+| 5.7 | Frontend: click on any frame to add refinement point | ⬜ |
+| 5.8 | Re-propagate from refinement point (forward and/or backward) | ⬜ |
+
+**Existing Components:**
+- `refineSAM2Mask` Redux thunk - Already implemented
+- `/refine` API endpoint - Already exists in SAM service
+- Needs UI buttons and click handling on propagated frames
+
+### ✅ Test Checkpoint - Part A (Polygon Editing)
+```
+Manual Test Steps:
+1. Initialize SAM2 session on video
+2. Click on object → initial mask appears
+3. Click "Edit Boundary" button
+4. Polygon overlay appears with draggable nodes on mask boundary
+5. Drag nodes to adjust the boundary (e.g., include missed area, exclude over-segmented area)
+6. Click "Done Editing" → refined mask replaces original
+7. Click "Propagate" → propagation uses the refined mask
+8. Verify: Propagated masks follow the refined boundary, not the original
+```
+
+### ✅ Test Checkpoint - Part B (Click Refinement)
 ```
 Manual Test Steps:
 1. Complete initial propagation (Milestone 3)
@@ -161,6 +199,27 @@ Manual Test Steps:
 4. Observe mask update on that frame
 5. Click "Re-propagate" → correction should flow to subsequent frames
 ```
+
+### Implementation Notes
+
+**Polygon Editing Workflow:**
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  Initial Click  │ ──▶ │  SAM2 Mask      │ ──▶ │  Edit Boundary  │
+│  on Object      │     │  Generated      │     │  (Optional)     │
+└─────────────────┘     └─────────────────┘     └────────┬────────┘
+                                                         │
+                        ┌─────────────────┐              ▼
+                        │   Propagate     │ ◀── ┌─────────────────┐
+                        │   to All Frames │     │  Refined Mask   │
+                        └─────────────────┘     │  (Polygon Edit) │
+                                                └─────────────────┘
+```
+
+**Key Integration Points:**
+- SAM2Controls: Add "Edit Boundary" button (visible when mask exists, before propagation)
+- AnnotationPage: Mount PolygonEditor overlay when editing mode is active
+- sam2Slice: Add `isEditingMask` state and action to update mask from polygon edit
 
 ---
 
@@ -219,14 +278,21 @@ Manual Test Steps:
 - `web-frontend/src/store/slices/sam2Slice.ts` - Added `saveSAM2MasksToDatabase` async thunk
 - `web-frontend/src/components/annotation/SAM2Controls.tsx` - Added "Save All to Database" button
 - `web-frontend/src/utils/api.ts` - Added `annotationAPI.saveSAM2Masks()` batch save function
+- `web-backend/app/services/export_service.py` - Fixed YOLO export contour extraction bug
 
 **How It Works:**
 1. User clicks "Save All to Database" button
 2. Frontend iterates through all `frameMasks` (frameIdx → objectId → base64 mask)
 3. For each mask, calls `POST /api/v1/videos/{video_id}/frames/{frame_number}/annotations`
 4. Progress is shown in real-time
-5. Masks are stored in PostgreSQL via the existing Annotation model
-6. Export service can now query these annotations and generate YOLO/COCO files
+5. Masks are stored in PostgreSQL (metadata) and MinIO (mask PNG files)
+6. Export service queries annotations and fetches mask data from MinIO
+7. Masks are converted to polygons using OpenCV contour extraction
+8. YOLO/COCO format files are generated with proper polygon coordinates
+
+**Bugs Fixed (Dec 26, 2024):**
+- **YOLO Export Empty Files**: Contour extraction code was incorrectly placed in `else` block (only ran when mask was None). Moved to run when mask IS successfully decoded.
+- **422 Validation Errors**: Removed `null` values from API payload for optional fields, added validation to skip empty mask data.
 
 ---
 
@@ -285,6 +351,49 @@ python load_test.py --users 10 --duration 30m
 
 ---
 
+## Milestone 10: Category Management
+
+**Goal**: Users can customize annotation categories for their specific use case (e.g., surgical tools, anatomy)
+**Test**: Create custom categories, assign to objects, export with correct labels
+
+| Task | Description | Status |
+|------|-------------|--------|
+| 10.1 | Category CRUD API (create, read, update, delete categories) | ⬜ |
+| 10.2 | Category management UI in project settings | ⬜ |
+| 10.3 | Custom color picker for each category | ⬜ |
+| 10.4 | Category presets (Surgical Tools, Anatomy, General) | ⬜ |
+| 10.5 | Import/export category lists (JSON/CSV) | ⬜ |
+| 10.6 | Category selector in SAM2 object creation flow | ⬜ |
+
+### ✅ Test Checkpoint
+```
+Manual Test Steps:
+1. Open project settings
+2. Navigate to "Categories" tab
+3. Delete default categories (Person, Anatomy, etc.)
+4. Add custom categories:
+   - "Forceps" with color #FF6B6B
+   - "Scissors" with color #4ECDC4
+   - "Gallbladder" with color #45B7D1
+5. Save changes
+6. Open annotation page → enable SAM 2 Mode
+7. When adding object, select category from dropdown
+8. Export to YOLO → verify classes.txt has custom category names
+```
+
+### Suggested Category Presets
+
+**Surgical Instruments:**
+- Forceps, Scissors, Grasper, Needle Driver, Retractor, Clip Applier, Suction, Cautery
+
+**Anatomy (Laparoscopic):**
+- Liver, Gallbladder, Stomach, Intestine, Peritoneum, Blood Vessel, Fat, Connective Tissue
+
+**General Objects:**
+- Person, Vehicle, Animal, Tool, Container, Furniture
+
+---
+
 ## Summary
 
 | Milestone | Description | Tasks | Test Type | Status |
@@ -293,13 +402,14 @@ python load_test.py --users 10 --duration 30m
 | 2 | API returns masks | 4 | cURL/Postman | ✅ Complete |
 | 3 | UI shows propagated masks | 5 | Manual UI | ✅ Complete |
 | 4 | Multi-user sessions | 4 | Manual (2 tabs) | 🟡 Partial |
-| 5 | Refinement works | 3 | Manual UI | ⬜ Not started |
+| 5 | Mask refinement & polygon editing | 8 | Manual UI | ⬜ Not started |
 | 6 | Multi-object tracking | 4 | Manual UI | ⬜ Not started |
 | 7 | Annotations persist | 4 | Manual UI | ✅ Complete |
 | 8 | Cloud GPU works | 4 | Manual + Latency | ⬜ Not started |
 | 9 | 10 concurrent users | 5 | Load test script | ⬜ Not started |
+| 10 | Category management | 6 | Manual UI | ⬜ Not started |
 
-**Total: 9 milestones, 36 tasks**
+**Total: 10 milestones, 47 tasks**
 **Completed: 4 milestones (1, 2, 3, 7)**
 
 ---
@@ -307,9 +417,10 @@ python load_test.py --users 10 --duration 30m
 ## Progress Tracking
 
 ### Current Status
-- **Current Milestone**: Milestone 8 (Cloud GPU Deployment)
-- **Completed Milestones**: 4/9 (1, 2, 3, 7)
-- **Completed Tasks**: 19/36
+- **Current Milestone**: Milestone 5 (Mask Refinement & Polygon Editing) or Milestone 10 (Category Management)
+- **Completed Milestones**: 4/10 (1, 2, 3, 7)
+- **Completed Tasks**: 19/47
+- **Last Updated**: December 26, 2024
 
 ### Milestone Completion Log
 | Milestone | Completed Date | Notes |
@@ -318,11 +429,12 @@ python load_test.py --users 10 --duration 30m
 | 2 | Dec 2024 | API endpoints working, tested with real video (1732 frames) |
 | 3 | Dec 2024 | Frontend integration with SAM2Controls component, Redux state, click-to-track |
 | 4 | Partial | Basic session management exists, Redis integration pending |
-| 5 | - | Refinement UI not started |
+| 5 | - | Polygon editing + click refinement - PolygonEditor component exists, needs SAM2 integration |
 | 6 | - | Multi-object UI not started |
-| 7 | Dec 2024 | **Save All to Database** - batch save masks, enables export |
+| 7 | Dec 26, 2024 | **Save All to Database** - batch save masks + YOLO/COCO export fully working |
 | 8 | - | Cloud GPU deployment not started |
 | 9 | - | Load testing not started |
+| 10 | - | Category management not started |
 
 ### Implementation Notes (Dec 2024)
 - Using `uv` for dependency management instead of pip
@@ -395,7 +507,7 @@ The frontend expects these SAM2 service endpoints:
 
 ---
 
-*Document Version: 1.3*
+*Document Version: 1.6*
 *Created: December 2024*
-*Updated: December 2024*
-*Last Change: Added Milestone 7 - Save All to Database*
+*Updated: December 26, 2024*
+*Last Change: Expanded Milestone 5 - Added polygon boundary editing before propagation + click-based refinement*
