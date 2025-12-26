@@ -167,6 +167,13 @@ artifacts/
 .DS_Store
 .vscode
 
+# Node.js
+node_modules/
+
+# Uploaded files / test videos
+uploads/
+*.mov
+
 # model checkpoint
 *.pt
 

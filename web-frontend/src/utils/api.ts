@@ -1,4 +1,11 @@
-import { Annotation, Project, SAMPredictionRequest, SAMPredictionResponse, User, Video } from '@/types'
+import {
+  Annotation,
+  Project,
+  SAMPredictionRequest,
+  SAMPredictionResponse,
+  User,
+  Video
+} from '@/types'
 import axios, { AxiosError, AxiosResponse, InternalAxiosRequestConfig } from 'axios'
 
 // Use relative URLs so Vite proxy handles routing to the backend
@@ -234,5 +241,123 @@ export const maskAPI = {
       console.error('Mask adjustment failed:', error)
       throw error
     }
+  },
+}
+
+// ============================================================
+// SAM 2 Video Annotation API
+// ============================================================
+
+// SAM 2 service client - always use proxy path
+// The browser can't access Docker internal hostnames, so we must use /sam2 proxy
+const sam2BaseUrl = '/sam2'
+
+const sam2Client = axios.create({
+  baseURL: sam2BaseUrl,
+  timeout: 300000, // 5 minutes for long propagation operations
+})
+
+export const sam2API = {
+  /**
+   * Check SAM 2 service health
+   */
+  health: async (): Promise<{ status: string; model_loaded: boolean; active_sessions: number }> => {
+    const response = await sam2Client.get('/health')
+    return response.data
+  },
+
+  /**
+   * Initialize a new video annotation session
+   */
+  initializeSession: async (videoPath: string): Promise<SAM2Session> => {
+    try {
+      console.log('SAM2: Initializing session for video:', videoPath)
+      const response = await sam2Client.post('/initialize', {
+        video_path: videoPath,
+      })
+      console.log('SAM2: Session initialized:', response.data)
+      return response.data
+    } catch (error: any) {
+      console.error('SAM2: Failed to initialize session:', error.response?.data || error.message)
+      throw new Error(error.response?.data?.detail || 'Failed to initialize SAM 2 session')
+    }
+  },
+
+  /**
+   * Get session status
+   */
+  getSessionStatus: async (sessionId: string): Promise<SAM2SessionStatus> => {
+    const response = await sam2Client.get(`/session/${sessionId}`)
+    return response.data
+  },
+
+  /**
+   * Close a session
+   */
+  closeSession: async (sessionId: string): Promise<void> => {
+    await sam2Client.post('/session/close', { session_id: sessionId })
+  },
+
+  /**
+   * Add an object to track using point prompts
+   */
+  addObject: async (request: SAM2AddObjectRequest): Promise<SAM2AddObjectResponse> => {
+    try {
+      console.log('SAM2: Adding object:', request)
+      const response = await sam2Client.post('/add-object', request)
+      console.log('SAM2: Object added:', response.data)
+      return response.data
+    } catch (error: any) {
+      console.error('SAM2: Failed to add object:', error.response?.data || error.message)
+      throw new Error(error.response?.data?.detail || 'Failed to add object')
+    }
+  },
+
+  /**
+   * Propagate masks across all frames
+   */
+  propagate: async (
+    request: SAM2PropagateRequest,
+    onProgress?: (progress: number) => void
+  ): Promise<SAM2PropagateResponse> => {
+    try {
+      console.log('SAM2: Starting propagation:', request)
+      const response = await sam2Client.post('/propagate', request)
+      console.log('SAM2: Propagation complete:', {
+        session_id: response.data.session_id,
+        total_frames: response.data.total_frames,
+        frames_count: response.data.frames?.length
+      })
+      return response.data
+    } catch (error: any) {
+      console.error('SAM2: Propagation failed:', error.response?.data || error.message)
+      throw new Error(error.response?.data?.detail || 'Failed to propagate masks')
+    }
+  },
+
+  /**
+   * Refine a mask on a specific frame
+   */
+  refine: async (request: SAM2RefineRequest): Promise<SAM2RefineResponse> => {
+    try {
+      console.log('SAM2: Refining mask:', request)
+      const response = await sam2Client.post('/refine', request)
+      console.log('SAM2: Mask refined:', response.data)
+      return response.data
+    } catch (error: any) {
+      console.error('SAM2: Refinement failed:', error.response?.data || error.message)
+      throw new Error(error.response?.data?.detail || 'Failed to refine mask')
+    }
+  },
+
+  /**
+   * Get masks for a specific frame
+   */
+  getFrameMasks: async (sessionId: string, frameIdx: number): Promise<Record<number, string>> => {
+    const response = await sam2Client.post('/frame-masks', {
+      session_id: sessionId,
+      frame_idx: frameIdx,
+    })
+    return response.data.masks
   },
 }

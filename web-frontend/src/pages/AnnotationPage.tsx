@@ -1,9 +1,12 @@
 import { AnnotationCanvas } from '@/components/annotation/AnnotationCanvas'
+import { SAM2Controls } from '@/components/annotation/SAM2Controls'
 import { VideoPlayer } from '@/components/annotation/VideoPlayer'
 import ExportDialog from '@/components/export/ExportDialog'
 import { addBox, addPoint, clearBoxes, clearPoints, resetAnnotationState, runSAMPrediction, setAwaitingDecision, setCurrentMask, setPromptType } from '@/store/slices/annotationSlice'
+import { addSAM2Object, setCurrentObjectId } from '@/store/slices/sam2Slice'
 import { fetchFrame, fetchVideo, setCurrentFrame } from '@/store/slices/videoSlice'
-import { RootState } from '@/store/store'
+import { AppDispatch, RootState } from '@/store/store'
+import { PolygonPoint } from '@/types'
 import { annotationAPI, projectAPI } from '@/utils/api'
 import { FileDownload } from '@mui/icons-material'
 import {
@@ -26,7 +29,7 @@ import { useParams } from 'react-router-dom'
 
 export const AnnotationPage = () => {
   const { projectId, videoId } = useParams<{ projectId: string; videoId: string }>()
-  const dispatch = useDispatch()
+  const dispatch = useDispatch<AppDispatch>()
 
   const { currentVideo, currentFrame, frameImageUrl, loading: videoLoading } = useSelector(
     (state: RootState) => state.video
@@ -39,6 +42,16 @@ export const AnnotationPage = () => {
     awaitingDecision,
     loading: annotationLoading
   } = useSelector((state: RootState) => state.annotation)
+
+  // SAM 2 state
+  const {
+    isEnabled: isSAM2Enabled,
+    session: sam2Session,
+    objects: sam2Objects,
+    nextObjectId: sam2NextObjectId,
+    frameMasks: sam2FrameMasks,
+    sessionLoading: sam2Loading,
+  } = useSelector((state: RootState) => state.sam2)
 
   const [selectedCategory, setSelectedCategory] = useState('')
   const [categories, setCategories] = useState<Array<{ id: number, name: string, color: string }>>([])
@@ -124,6 +137,29 @@ export const AnnotationPage = () => {
 
   const handlePointClick = async (x: number, y: number, isPositive: boolean) => {
     console.log('DEBUG: AnnotationPage handlePointClick called with:', { x, y, isPositive })
+
+    // Handle SAM 2 mode
+    if (isSAM2Enabled && sam2Session) {
+      console.log('SAM2: Adding object with point click')
+      try {
+        await dispatch(addSAM2Object({
+          session_id: sam2Session.session_id,
+          frame_idx: currentFrame,
+          object_id: sam2NextObjectId,
+          points: [[x, y]],
+          labels: [isPositive ? 1 : 0],
+          name: `${selectedCategory} ${sam2NextObjectId}`,
+          category: selectedCategory,
+        })).unwrap()
+        console.log('SAM2: Object added successfully')
+      } catch (error) {
+        console.error('SAM2: Failed to add object:', error)
+        alert(`Failed to add object: ${error}`)
+      }
+      return
+    }
+
+    // Original SAM (frame-by-frame) mode
     const newPoint = { x, y, is_positive: isPositive }
     console.log('DEBUG: Adding point to Redux state:', newPoint)
     dispatch(addPoint(newPoint))
@@ -828,22 +864,36 @@ export const AnnotationPage = () => {
               onPointClick={handlePointClick}
               onBoxSelect={handleBoxSelect}
               promptType={promptType}
-              onPromptTypeChange={(type) => dispatch(setPromptType(type))}
-              currentMask={currentMask}
-              selectedPoints={selectedPoints}
-              selectedBoxes={selectedBoxes}
+              onPromptTypeChange={(type: 'point' | 'box') => dispatch(setPromptType(type))}
+              currentMask={isSAM2Enabled ? null : currentMask}
+              selectedPoints={isSAM2Enabled ? [] : selectedPoints}
+              selectedBoxes={isSAM2Enabled ? [] : selectedBoxes}
               existingAnnotations={(() => {
-                // Use category colors for semantic meaning (Anatomy=red, Instrument=blue, etc.)
-                // For same-category annotations, we'll vary opacity in AnnotationCanvas
-                const mapped = existingAnnotations.map((ann, index) => ({
+                // In SAM 2 mode, show tracked object masks
+                if (isSAM2Enabled && sam2FrameMasks[currentFrame]) {
+                  const sam2MaskColors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD'];
+                  return Object.entries(sam2FrameMasks[currentFrame]).map(([objectIdStr, mask], index) => {
+                    const objectId = parseInt(objectIdStr);
+                    const obj = sam2Objects.find(o => o.object_id === objectId);
+                    return {
+                      mask: `data:image/png;base64,${mask}`,
+                      category: obj?.category || 'SAM2 Object',
+                      color: obj ? `rgb(${obj.color[0]},${obj.color[1]},${obj.color[2]})` : sam2MaskColors[index % sam2MaskColors.length],
+                      annotationIndex: index,
+                      annotationId: objectId,
+                      isSelected: false
+                    };
+                  });
+                }
+                // Original mode: show existing annotations
+                const mapped = existingAnnotations.map((ann: any, index: number) => ({
                   mask: ann.mask_url || '',
                   category: ann.category_name || 'Unknown',
                   color: ann.category_color || '#888888',
-                  annotationIndex: index, // Pass index for opacity variation
+                  annotationIndex: index,
                   annotationId: ann.id,
                   isSelected: selectedAnnotation?.id === ann.id
                 }))
-                console.log('DEBUG: Passing existingAnnotations to canvas:', mapped)
                 return mapped
               })()}
               onAnnotationClick={handleAnnotationClick}
@@ -865,11 +915,21 @@ export const AnnotationPage = () => {
           </Paper>
         </Grid>
 
+        {/* SAM 2 Controls Panel */}
+        <Grid item xs={12}>
+          <SAM2Controls
+            videoPath={currentVideo?.file_path || ''}
+            currentFrame={currentFrame}
+            selectedCategory={selectedCategory}
+            onObjectClick={(objectId) => dispatch(setCurrentObjectId(objectId))}
+          />
+        </Grid>
+
         {/* Bottom Panel - Annotation Controls */}
         <Grid item xs={12}>
           <Paper sx={{ p: 2 }}>
             <Typography variant="h6" gutterBottom>
-              Annotation Controls
+              {isSAM2Enabled ? 'SAM 2 Video Annotation' : 'Annotation Controls'}
             </Typography>
 
             <Grid container spacing={2} alignItems="center">
