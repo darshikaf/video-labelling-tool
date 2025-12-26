@@ -94,6 +94,10 @@ def create_annotation_for_video_frame(
     """Create annotation for a specific video frame"""
     import base64
     import io
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    logger.info(f"Creating annotation: video_id={video_id}, frame={frame_number}, category={request.category_name}, mask_len={len(request.mask_data) if request.mask_data else 0}")
 
     try:
         # Get video to find project_id

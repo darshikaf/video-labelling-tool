@@ -14,6 +14,7 @@ import {
   initializeSAM2Session,
   propagateSAM2Masks,
   resetSAM2State,
+  saveSAM2MasksToDatabase,
   toggleSAM2Mode
 } from '@/store/slices/sam2Slice'
 import { AppDispatch, RootState } from '@/store/store'
@@ -24,6 +25,7 @@ import {
   ExpandMore,
   PlayArrow,
   Refresh,
+  Save,
   Stop
 } from '@mui/icons-material'
 import {
@@ -50,6 +52,7 @@ import { useDispatch, useSelector } from 'react-redux'
 
 interface SAM2ControlsProps {
   videoPath: string
+  videoId: number
   currentFrame: number
   onObjectClick?: (objectId: number) => void
   selectedCategory: string
@@ -57,6 +60,7 @@ interface SAM2ControlsProps {
 
 export const SAM2Controls = ({
   videoPath,
+  videoId,
   currentFrame,
   onObjectClick,
   selectedCategory,
@@ -76,6 +80,10 @@ export const SAM2Controls = ({
     isPropagating,
     propagationProgress,
     propagationError,
+    isSaving,
+    saveProgress,
+    saveError,
+    savedToDatabase,
   } = useSelector((state: RootState) => state.sam2)
 
   // Check if current frame has masks
@@ -122,6 +130,14 @@ export const SAM2Controls = ({
       dispatch(closeSAM2Session(session.session_id))
     }
     dispatch(resetSAM2State())
+  }
+
+  const handleSaveToDatabase = () => {
+    if (!videoId) {
+      alert('No video ID available')
+      return
+    }
+    dispatch(saveSAM2MasksToDatabase({ videoId }))
   }
 
   // Helper to format color for display
@@ -270,10 +286,22 @@ export const SAM2Controls = ({
                 color="secondary"
                 startIcon={isPropagating ? <CircularProgress size={16} color="inherit" /> : <Refresh />}
                 onClick={handlePropagate}
-                disabled={isPropagating || objects.length === 0}
+                disabled={isPropagating || isSaving || objects.length === 0}
               >
                 {isPropagating ? 'Propagating...' : 'Propagate to All Frames'}
               </Button>
+
+              <Tooltip title="Save all propagated masks to database for export">
+                <Button
+                  variant="contained"
+                  color="success"
+                  startIcon={isSaving ? <CircularProgress size={16} color="inherit" /> : <Save />}
+                  onClick={handleSaveToDatabase}
+                  disabled={isSaving || isPropagating || framesWithMasks === 0}
+                >
+                  {isSaving ? 'Saving...' : 'Save All to Database'}
+                </Button>
+              </Tooltip>
 
               <Tooltip title="Close current session">
                 <Button
@@ -282,7 +310,7 @@ export const SAM2Controls = ({
                   size="small"
                   startIcon={<Stop />}
                   onClick={handleCloseSession}
-                  disabled={isPropagating}
+                  disabled={isPropagating || isSaving}
                 >
                   Close Session
                 </Button>
@@ -300,12 +328,36 @@ export const SAM2Controls = ({
               </Box>
             )}
 
+            {/* Save progress */}
+            {isSaving && (
+              <Box sx={{ mt: 2 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                  <Typography variant="caption">Saving to database...</Typography>
+                  <Typography variant="caption">{saveProgress.toFixed(0)}%</Typography>
+                </Box>
+                <LinearProgress variant="determinate" value={saveProgress} color="success" />
+              </Box>
+            )}
+
+            {/* Save error */}
+            {saveError && (
+              <Alert severity="error" sx={{ mt: 2 }}>
+                {saveError}
+              </Alert>
+            )}
+
             {/* Status summary */}
-            {framesWithMasks > 0 && !isPropagating && (
-              <Box sx={{ mt: 2, p: 1, backgroundColor: 'rgba(76, 175, 80, 0.1)', borderRadius: 1 }}>
+            {framesWithMasks > 0 && !isPropagating && !isSaving && (
+              <Box sx={{ mt: 2, p: 1, backgroundColor: savedToDatabase ? 'rgba(76, 175, 80, 0.15)' : 'rgba(76, 175, 80, 0.1)', borderRadius: 1 }}>
                 <Typography variant="body2" color="success.main">
                   ✓ Masks available for {framesWithMasks} / {session.total_frames} frames
+                  {savedToDatabase && ' (Saved to database)'}
                 </Typography>
+                {!savedToDatabase && (
+                  <Typography variant="caption" color="text.secondary">
+                    Click "Save All to Database" to enable export
+                  </Typography>
+                )}
               </Box>
             )}
           </>

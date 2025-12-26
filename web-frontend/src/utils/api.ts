@@ -162,6 +162,91 @@ export const annotationAPI = {
     return response.data
   },
 
+  /**
+   * Batch save SAM2 masks to database
+   * Returns the number of successfully saved annotations
+   */
+  saveSAM2Masks: async (
+    videoId: number,
+    frameMasks: Record<number, Record<number, string>>,  // frameIdx -> objectId -> base64 mask
+    objects: Array<{ object_id: number; name: string; category: string }>,
+    onProgress?: (saved: number, total: number) => void
+  ): Promise<{ saved: number; failed: number; errors: string[] }> => {
+    const errors: string[] = []
+    let saved = 0
+    let failed = 0
+
+    // Create a map of objectId to category name
+    const objectCategoryMap = new Map(
+      objects.map(obj => [obj.object_id, obj.category || obj.name || 'object'])
+    )
+
+    // Get all frame indices sorted
+    const frameIndices = Object.keys(frameMasks).map(Number).sort((a, b) => a - b)
+    const totalMasks = frameIndices.reduce(
+      (sum, frameIdx) => sum + Object.keys(frameMasks[frameIdx]).length,
+      0
+    )
+
+    console.log(`SAM2: Saving ${totalMasks} masks across ${frameIndices.length} frames to videoId=${videoId}`)
+    console.log(`SAM2: Objects:`, objects)
+    console.log(`SAM2: Frame indices:`, frameIndices.slice(0, 10), '...')
+
+    for (const frameIdx of frameIndices) {
+      const objectMasks = frameMasks[frameIdx]
+
+      for (const [objectIdStr, maskData] of Object.entries(objectMasks)) {
+        const objectId = parseInt(objectIdStr)
+        const categoryName = objectCategoryMap.get(objectId) || 'object'
+
+        // Skip if mask data is empty or invalid
+        if (!maskData || typeof maskData !== 'string' || maskData.length < 100) {
+          console.warn(`SAM2: Skipping frame ${frameIdx}, object ${objectId} - invalid mask data`)
+          failed++
+          errors.push(`Frame ${frameIdx}, Object ${objectId}: Empty or invalid mask data`)
+          continue
+        }
+
+        try {
+          // Debug first few
+          if (saved + failed < 3) {
+            console.log(`SAM2 Save Debug: Frame ${frameIdx}, Object ${objectId}`, {
+              category_name: categoryName,
+              mask_data_length: maskData?.length || 0,
+              mask_data_preview: maskData?.substring(0, 100),
+              mask_starts_with_data: maskData?.startsWith('data:'),
+            })
+          }
+
+          // Don't send null values - only include fields that have values
+          const payload: Record<string, unknown> = {
+            category_name: categoryName,
+            mask_data: maskData,
+            confidence: 1.0,  // SAM2 propagated masks
+          }
+
+          await apiClient.post(`/videos/${videoId}/frames/${frameIdx}/annotations`, payload)
+          saved++
+        } catch (error: any) {
+          failed++
+          // Get detailed error from response
+          const errorDetail = error.response?.data?.detail || error.message || 'Unknown error'
+          const errorMsg = `Frame ${frameIdx}, Object ${objectId}: ${JSON.stringify(errorDetail)}`
+          errors.push(errorMsg)
+          console.error('SAM2: Failed to save annotation:', errorMsg, error.response?.data)
+        }
+
+        // Report progress
+        if (onProgress) {
+          onProgress(saved + failed, totalMasks)
+        }
+      }
+    }
+
+    console.log(`SAM2: Save complete. Saved: ${saved}, Failed: ${failed}`)
+    return { saved, failed, errors }
+  },
+
   updateAnnotation: async (annotationId: number, data: Partial<Annotation>): Promise<Annotation> => {
     const response = await apiClient.put(`/annotations/${annotationId}`, data)
     return response.data

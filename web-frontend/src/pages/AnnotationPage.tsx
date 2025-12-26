@@ -919,6 +919,7 @@ export const AnnotationPage = () => {
         <Grid item xs={12}>
           <SAM2Controls
             videoPath={currentVideo?.file_path || ''}
+            videoId={currentVideo?.id || 0}
             currentFrame={currentFrame}
             selectedCategory={selectedCategory}
             onObjectClick={(objectId) => dispatch(setCurrentObjectId(objectId))}

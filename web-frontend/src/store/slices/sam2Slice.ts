@@ -3,7 +3,7 @@ import {
   SAM2Session,
   SAM2TrackedObject
 } from '@/types'
-import { sam2API } from '@/utils/api'
+import { annotationAPI, sam2API } from '@/utils/api'
 import { createAsyncThunk, createSlice, PayloadAction } from '@reduxjs/toolkit'
 
 interface SAM2State {
@@ -30,6 +30,12 @@ interface SAM2State {
   propagationProgress: number
   propagationError: string | null
 
+  // Save to database state
+  isSaving: boolean
+  saveProgress: number
+  saveError: string | null
+  savedToDatabase: boolean
+
   // UI state
   pendingClick: { x: number; y: number; isPositive: boolean } | null
 }
@@ -46,6 +52,10 @@ const initialState: SAM2State = {
   isPropagating: false,
   propagationProgress: 0,
   propagationError: null,
+  isSaving: false,
+  saveProgress: 0,
+  saveError: null,
+  savedToDatabase: false,
   pendingClick: null,
 }
 
@@ -128,6 +138,47 @@ export const refineSAM2Mask = createAsyncThunk(
   }
 )
 
+export const saveSAM2MasksToDatabase = createAsyncThunk(
+  'sam2/saveToDatabase',
+  async (
+    { videoId }: { videoId: number },
+    { getState, dispatch, rejectWithValue }
+  ) => {
+    try {
+      const state = getState() as { sam2: SAM2State }
+      const { frameMasks, objects } = state.sam2
+
+      // Check if there are masks to save
+      const totalFrames = Object.keys(frameMasks).length
+      if (totalFrames === 0) {
+        return rejectWithValue('No masks to save. Run propagation first.')
+      }
+
+      console.log(`SAM2: Saving masks for ${totalFrames} frames to database`)
+
+      // Use the batch save API
+      const result = await annotationAPI.saveSAM2Masks(
+        videoId,
+        frameMasks,
+        objects.map(obj => ({
+          object_id: obj.object_id,
+          name: obj.name,
+          category: obj.category,
+        })),
+        (saved, total) => {
+          // Update progress
+          const progress = Math.round((saved / total) * 100)
+          dispatch(setSaveProgress(progress))
+        }
+      )
+
+      return result
+    } catch (error: any) {
+      return rejectWithValue(error.message || 'Failed to save masks to database')
+    }
+  }
+)
+
 const sam2Slice = createSlice({
   name: 'sam2',
   initialState,
@@ -150,9 +201,13 @@ const sam2Slice = createSlice({
     setPropagationProgress: (state, action: PayloadAction<number>) => {
       state.propagationProgress = action.payload
     },
+    setSaveProgress: (state, action: PayloadAction<number>) => {
+      state.saveProgress = action.payload
+    },
     clearSAM2Error: (state) => {
       state.sessionError = null
       state.propagationError = null
+      state.saveError = null
     },
     setFrameMask: (state, action: PayloadAction<{ frameIdx: number; objectId: number; mask: string }>) => {
       const { frameIdx, objectId, mask } = action.payload
@@ -275,6 +330,25 @@ const sam2Slice = createSlice({
         }
         state.frameMasks[frameIdx][response.object_id] = response.mask
       })
+
+      // Save to database
+      .addCase(saveSAM2MasksToDatabase.pending, (state) => {
+        state.isSaving = true
+        state.saveProgress = 0
+        state.saveError = null
+        state.savedToDatabase = false
+      })
+      .addCase(saveSAM2MasksToDatabase.fulfilled, (state, action) => {
+        state.isSaving = false
+        state.saveProgress = 100
+        state.savedToDatabase = true
+        console.log('SAM2: Saved to database:', action.payload)
+      })
+      .addCase(saveSAM2MasksToDatabase.rejected, (state, action) => {
+        state.isSaving = false
+        state.saveError = action.payload as string
+        console.error('SAM2: Save to database failed:', action.payload)
+      })
   },
 })
 
@@ -285,6 +359,7 @@ export const {
   setCurrentObjectId,
   setPendingClick,
   setPropagationProgress,
+  setSaveProgress,
   clearSAM2Error,
   setFrameMask,
   resetSAM2State,
