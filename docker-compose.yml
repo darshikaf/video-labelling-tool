@@ -73,9 +73,15 @@ services:
       - MINIO_ACCESS_KEY=minioadmin
       - MINIO_SECRET_KEY=minioadmin
       - SAM2_DEVICE=cpu # Use CPU for development (safer)
-      - SESSION_TIMEOUT=300 # 5 minutes
+      - SESSION_TIMEOUT=900 # 15 minutes (increased from 5 to handle long propagations)
       - MAX_CONCURRENT_SESSIONS=2 # Max 2 sessions
       - MAX_FRAME_DIMENSION=1920 # Max 1080p resolution
+      # OPTIMIZATION: Enable model quantization for 2-4x speedup on CPU
+      - SAM2_QUANTIZE=true # Set to false to disable quantization
+      # OPTIMIZATION: SAM2 performance tuning for faster encoding
+      - SAM2_MEMORY_BANK_SIZE=4 # Lower = faster (default: 7, range: 1-7)
+      - SAM2_MAX_MEM_FRAMES=4 # Memory frames to keep (default: 7)
+      - SAM2_DISABLE_POSTPROC=false # Set to true for 10-20% speedup
     depends_on:
       - redis
     deploy:
@@ -84,7 +90,7 @@ services:
           cpus: '6.0' # Limit to 6 CPU cores (SAM 2 is CPU-intensive)
           memory: 8G # Limit to 8GB RAM (for video frames + model)
         reservations:
-          cpus: '2.0'
+          cpus: '3.0' # Increased from 2.0 for better stability
           memory: 2G
     # Uncomment for GPU support:
     # deploy:

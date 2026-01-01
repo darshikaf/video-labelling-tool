@@ -84,8 +84,8 @@ async def lifespan(app: FastAPI):
         model_dir=model_dir,
         device=os.getenv("SAM2_DEVICE", "auto"),
         session_timeout=int(
-            os.getenv("SESSION_TIMEOUT", "300")
-        ),  # 5 minutes (reduced from 30)
+            os.getenv("SESSION_TIMEOUT", "900")
+        ),  # 15 minutes (increased to handle long propagations)
         max_concurrent_sessions=int(os.getenv("MAX_CONCURRENT_SESSIONS", "2")),
         max_video_frames=int(
             os.getenv("MAX_VIDEO_FRAMES", "300")

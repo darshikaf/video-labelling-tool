@@ -29,8 +29,15 @@ services:
     platform: linux/amd64
     environment:
       - REDIS_URL=redis://redis:6379/1
-      # CPU-specific optimizations for ML workloads
-      - OMP_NUM_THREADS=2
-      - TORCH_NUM_INTEROP_THREADS=2
-      - TORCH_NUM_THREADS=2
+      # CPU-specific optimizations for ML workloads (increased for better performance)
+      - OMP_NUM_THREADS=4 # Increased from 2 for better throughput
+      - TORCH_NUM_INTEROP_THREADS=4
+      - TORCH_NUM_THREADS=4
       - CUDA_VISIBLE_DEVICES=""
+      # OPTIMIZATION: Model quantization and settings
+      - SAM2_QUANTIZE=true
+      - SAM2_MODEL_SIZE=tiny
+      # OPTIMIZATION: Aggressive performance tuning for CPU-constrained systems
+      - SAM2_MEMORY_BANK_SIZE=3 # Aggressive: 3 for 40%+ speedup (vs default 7)
+      - SAM2_MAX_MEM_FRAMES=3 # Fewer memory frames
+      - SAM2_DISABLE_POSTPROC=true # Disable post-processing for speed

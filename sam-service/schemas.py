@@ -222,13 +222,35 @@ class ErrorResponse(BaseModel):
 
 
 def encode_mask(mask_array: np.ndarray) -> str:
-    """Encode numpy mask array to base64 PNG string"""
+    """Encode numpy mask array to base64 PNG string with validation"""
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # CRITICAL: Validate mask before encoding to prevent corrupted output
+    if np.isnan(mask_array).any():
+        logger.error("encode_mask: Mask contains NaN values! Returning empty mask.")
+        mask_array = np.zeros_like(mask_array, dtype=np.uint8)
+
+    if mask_array.size == 0:
+        logger.error("encode_mask: Empty mask array! Creating default empty mask.")
+        mask_array = np.zeros((480, 640), dtype=np.uint8)
+
+    # Validate and clip mask values to valid range
     if mask_array.dtype != np.uint8:
+        # Check range before conversion
+        if mask_array.max() > 255 or mask_array.min() < 0:
+            logger.warning(f"encode_mask: Mask has invalid range [{mask_array.min()}, {mask_array.max()}], clipping to [0, 255]")
+            mask_array = np.clip(mask_array, 0, 255)
         mask_array = (mask_array * 255).astype(np.uint8)
+
+    # Final validation: ensure uint8 mask is in valid range
+    if mask_array.max() > 255 or mask_array.min() < 0:
+        logger.warning(f"encode_mask: Final mask out of range, clipping")
+        mask_array = np.clip(mask_array, 0, 255).astype(np.uint8)
 
     mask_image = Image.fromarray(mask_array, mode="L")
     buffer = io.BytesIO()
-    mask_image.save(buffer, format="PNG")
+    mask_image.save(buffer, format="PNG", optimize=True)  # Add optimize=True for smaller size
     return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
 
