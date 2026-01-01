@@ -18,13 +18,29 @@ const initialState: AuthState = {
 
 export const login = createAsyncThunk(
   'auth/login',
-  async ({ email, password }: { email: string; password: string }) => {
-    const response = await authAPI.login(email, password)
-    localStorage.setItem('token', response.access_token)
+  async ({ email, password }: { email: string; password: string }, { rejectWithValue }) => {
+    try {
+      const response = await authAPI.login(email, password)
+      localStorage.setItem('token', response.access_token)
 
-    // Also fetch user info after successful login
-    const user = await authAPI.getCurrentUser()
-    return { ...response, user }
+      // Also fetch user info after successful login
+      const user = await authAPI.getCurrentUser()
+      return { ...response, user }
+    } catch (error: any) {
+      // Extract error message from API response
+      const status = error.response?.status
+      const detail = error.response?.data?.detail
+
+      if (status === 401) {
+        return rejectWithValue('Invalid email or password. Please check your credentials and try again.')
+      } else if (status === 422) {
+        return rejectWithValue('Invalid email format. Please enter a valid email address.')
+      } else if (detail) {
+        return rejectWithValue(detail)
+      } else {
+        return rejectWithValue('Unable to connect to the server. Please try again later.')
+      }
+    }
   }
 )
 
@@ -70,7 +86,7 @@ const authSlice = createSlice({
       })
       .addCase(login.rejected, (state, action) => {
         state.loading = false
-        state.error = action.error.message || 'Login failed'
+        state.error = (action.payload as string) || action.error.message || 'Login failed'
       })
       .addCase(register.pending, (state) => {
         state.loading = true

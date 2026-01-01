@@ -1,3 +1,4 @@
+import logging
 from typing import Optional
 from sqlalchemy.orm import Session
 
@@ -24,10 +25,18 @@ class CRUDUser(CRUDBase[User, UserCreate, UserBase]):
     def authenticate(
         self, db: Session, *, email: str, password: str
     ) -> Optional[User]:
+        logger = logging.getLogger(__name__)
+        
         user = self.get_by_email(db, email=email)
         if not user:
+            logger.warning(f"AUTH DEBUG: User not found for email: {email}")
             return None
-        if not verify_password(password, user.password_hash):
+        
+        logger.info(f"AUTH DEBUG: User found: {user.email}, checking password...")
+        password_valid = verify_password(password, user.password_hash)
+        logger.info(f"AUTH DEBUG: Password valid: {password_valid}")
+        
+        if not password_valid:
             return None
         return user
 
