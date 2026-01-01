@@ -149,6 +149,28 @@ class PropagateResponse(BaseModel):
 
 
 # ============================================================
+# Mask Update
+# ============================================================
+
+
+class UpdateMaskRequest(BaseModel):
+    """Request to update a mask with a custom edited mask"""
+
+    session_id: str = Field(..., description="Session identifier")
+    frame_idx: int = Field(..., description="Frame index")
+    object_id: int = Field(..., description="Object ID to update")
+    mask: str = Field(..., description="Base64 encoded mask (PNG format)")
+
+
+class UpdateMaskResponse(BaseModel):
+    """Response after updating a mask"""
+
+    object_id: int = Field(..., description="Object ID")
+    frame_idx: int = Field(..., description="Frame index")
+    mask: str = Field(..., description="Base64 encoded updated mask")
+
+
+# ============================================================
 # Refinement
 # ============================================================
 

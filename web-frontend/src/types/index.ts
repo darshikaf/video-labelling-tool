@@ -157,3 +157,16 @@ export interface SAM2RefineResponse {
   frame_idx: number
   mask: string
 }
+
+export interface SAM2UpdateMaskRequest {
+  session_id: string
+  frame_idx: number
+  object_id: number
+  mask: string  // base64 encoded PNG
+}
+
+export interface SAM2UpdateMaskResponse {
+  object_id: number
+  frame_idx: number
+  mask: string
+}

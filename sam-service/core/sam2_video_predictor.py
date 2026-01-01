@@ -862,6 +862,97 @@ class SAM2VideoPredictor:
 
         return {"object_id": object_id, "frame_idx": frame_idx, "mask": mask}
 
+    def update_mask(
+        self,
+        session_id: str,
+        frame_idx: int,
+        object_id: int,
+        mask: np.ndarray,
+    ) -> Dict[str, Any]:
+        """
+        Update an object's mask with a custom edited mask (e.g., from polygon editing).
+
+        This replaces the SAM2-generated mask with a user-edited version.
+        The updated mask will be used as the starting point for propagation.
+
+        Args:
+            session_id: Session ID
+            frame_idx: Frame index to update
+            object_id: Object ID to update
+            mask: Custom mask array (H, W) with values 0 or 255
+
+        Returns:
+            Dictionary with updated mask
+        """
+        session = self.get_session(session_id)
+        if not session:
+            raise ValueError(f"Session not found: {session_id}")
+
+        if object_id not in session.objects:
+            raise ValueError(f"Object not found: {object_id}")
+
+        tracked_object = session.objects[object_id]
+
+        # Convert to grayscale if RGB/RGBA (from canvas PNG)
+        if mask.ndim == 3:
+            logger.info(f"Mask has {mask.ndim} dimensions (RGB/RGBA), converting to grayscale")
+            # Take first channel (they should all be the same for a binary mask)
+            mask = mask[:, :, 0]
+        elif mask.ndim != 2:
+            raise ValueError(f"Mask must be 2D or 3D array, got {mask.ndim}D")
+
+        # Validate and normalize mask
+        if mask.dtype != np.uint8:
+            mask = (mask * 255).astype(np.uint8)
+
+        # Ensure mask has correct dimensions
+        if mask.shape != (session.frame_height, session.frame_width):
+            logger.warning(
+                f"Mask dimensions {mask.shape} don't match session dimensions "
+                f"({session.frame_height}, {session.frame_width}). Resizing..."
+            )
+            from PIL import Image
+            mask_img = Image.fromarray(mask, mode='L')
+            mask_img = mask_img.resize((session.frame_width, session.frame_height), Image.LANCZOS)
+            mask = np.array(mask_img)
+
+        # Normalize to binary (0 or 255)
+        mask = ((mask > 128) * 255).astype(np.uint8)
+
+        # Update the stored mask
+        tracked_object.masks[frame_idx] = mask
+
+        # CRITICAL: Update the SAM2 inference state so propagation uses the edited mask
+        if self.predictor is not None and session.inference_state is not None:
+            try:
+                # Convert mask to boolean for SAM2
+                mask_bool = mask > 128
+
+                logger.info(
+                    f"Injecting edited mask into SAM2 inference state for object {object_id} on frame {frame_idx}"
+                )
+
+                # Use SAM2's add_new_mask API to inject the edited mask into inference state
+                # This ensures propagation will use the edited mask, not the original
+                with torch.inference_mode():
+                    self.predictor.add_new_mask(
+                        inference_state=session.inference_state,
+                        frame_idx=frame_idx,
+                        obj_id=object_id,
+                        mask=mask_bool,
+                    )
+
+                logger.info(
+                    f"Successfully updated SAM2 inference state. "
+                    f"Propagation will now use the edited mask!"
+                )
+            except Exception as e:
+                logger.error(f"Failed to update SAM2 inference state: {e}")
+                logger.error("The mask is updated in memory but propagation may use the original mask!")
+                raise ValueError(f"Failed to inject mask into SAM2 inference state: {str(e)}")
+
+        return {"object_id": object_id, "frame_idx": frame_idx, "mask": mask}
+
     def get_frame_masks(self, session_id: str, frame_idx: int) -> Dict[int, np.ndarray]:
         """Get all object masks for a specific frame"""
         session = self.get_session(session_id)
