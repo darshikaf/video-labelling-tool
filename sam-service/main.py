@@ -40,6 +40,9 @@ from schemas import (
     RefineRequest,
     RefineResponse,
     SessionStatusResponse,
+    UpdateMaskRequest,
+    UpdateMaskResponse,
+    decode_mask,
     encode_mask,
 )
 
@@ -84,8 +87,8 @@ async def lifespan(app: FastAPI):
         model_dir=model_dir,
         device=os.getenv("SAM2_DEVICE", "auto"),
         session_timeout=int(
-            os.getenv("SESSION_TIMEOUT", "300")
-        ),  # 5 minutes (reduced from 30)
+            os.getenv("SESSION_TIMEOUT", "900")
+        ),  # 15 minutes (increased to handle long propagations)
         max_concurrent_sessions=int(os.getenv("MAX_CONCURRENT_SESSIONS", "2")),
         max_video_frames=int(
             os.getenv("MAX_VIDEO_FRAMES", "300")
@@ -431,6 +434,40 @@ async def refine_mask(request: RefineRequest):
     except Exception as e:
         logger.error(f"Failed to refine mask: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to refine: {str(e)}")
+
+
+@app.post("/update-mask", response_model=UpdateMaskResponse)
+async def update_mask(request: UpdateMaskRequest):
+    """
+    Update a mask with a custom edited mask (e.g., from polygon editing).
+
+    This allows replacing the SAM2-generated mask with a user-edited version
+    before propagation.
+    """
+    if not sam2_predictor:
+        raise HTTPException(status_code=503, detail="SAM 2 service not initialized")
+
+    try:
+        # Decode the base64 mask
+        mask_array = decode_mask(request.mask)
+
+        result = sam2_predictor.update_mask(
+            session_id=request.session_id,
+            frame_idx=request.frame_idx,
+            object_id=request.object_id,
+            mask=mask_array,
+        )
+
+        return UpdateMaskResponse(
+            object_id=result["object_id"],
+            frame_idx=result["frame_idx"],
+            mask=encode_mask(result["mask"]),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to update mask: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update mask: {str(e)}")
 
 
 # ============================================================

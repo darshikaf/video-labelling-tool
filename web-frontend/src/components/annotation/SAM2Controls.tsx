@@ -15,18 +15,24 @@ import {
   propagateSAM2Masks,
   resetSAM2State,
   saveSAM2MasksToDatabase,
-  toggleSAM2Mode
+  startBoundaryEditing,
+  stopBoundaryEditing,
+  toggleRefinementMode,
+  toggleSAM2Mode,
+  updateSAM2Mask
 } from '@/store/slices/sam2Slice'
 import { AppDispatch, RootState } from '@/store/store'
 import {
   CheckCircle,
   Circle,
+  Edit,
   ExpandLess,
   ExpandMore,
   PlayArrow,
   Refresh,
   Save,
-  Stop
+  Stop,
+  Tune
 } from '@mui/icons-material'
 import {
   Alert,
@@ -56,6 +62,7 @@ interface SAM2ControlsProps {
   currentFrame: number
   onObjectClick?: (objectId: number) => void
   selectedCategory: string
+  sam2PolygonPoints?: Array<{ x: number; y: number }>
 }
 
 export const SAM2Controls = ({
@@ -64,6 +71,7 @@ export const SAM2Controls = ({
   currentFrame,
   onObjectClick,
   selectedCategory,
+  sam2PolygonPoints = []
 }: SAM2ControlsProps) => {
   const dispatch = useDispatch<AppDispatch>()
   const [expanded, setExpanded] = useState(true)
@@ -84,6 +92,10 @@ export const SAM2Controls = ({
     saveProgress,
     saveError,
     savedToDatabase,
+    isEditingBoundary,
+    editingObjectId,
+    editingFrameIdx,
+    isRefinementMode,
   } = useSelector((state: RootState) => state.sam2)
 
   // Check if current frame has masks
@@ -138,6 +150,77 @@ export const SAM2Controls = ({
       return
     }
     dispatch(saveSAM2MasksToDatabase({ videoId }))
+  }
+
+  const handleEditBoundary = () => {
+    // Start boundary editing for the current object on the current frame
+    const currentFrameMaskObjectIds = Object.keys(currentFrameMasks).map(id => parseInt(id))
+
+    if (currentFrameMaskObjectIds.length === 0) {
+      alert('No masks on current frame to edit')
+      return
+    }
+
+    // Use current object if set, otherwise use the first object with a mask on this frame
+    const objectToEdit = currentObjectId !== null && currentFrameMaskObjectIds.includes(currentObjectId)
+      ? currentObjectId
+      : currentFrameMaskObjectIds[0]
+
+    console.log('SAM2: Starting boundary editing', { objectToEdit, frame: currentFrame })
+
+    dispatch(startBoundaryEditing({
+      objectId: objectToEdit,
+      frameIdx: currentFrame
+    }))
+  }
+
+  const handleDoneEditing = async () => {
+    console.log('SAM2: Done editing boundary, saving edited polygon')
+
+    // Convert polygon points to mask
+    if (sam2PolygonPoints.length >= 3 && editingObjectId !== null && editingFrameIdx !== null && session) {
+      const canvas = document.createElement('canvas')
+      const ctx = canvas.getContext('2d')
+      if (ctx) {
+        canvas.width = 640
+        canvas.height = 480
+        ctx.fillStyle = 'black'
+        ctx.fillRect(0, 0, 640, 480)
+        ctx.fillStyle = 'white'
+        ctx.beginPath()
+        ctx.moveTo(sam2PolygonPoints[0].x, sam2PolygonPoints[0].y)
+        for (let i = 1; i < sam2PolygonPoints.length; i++) {
+          ctx.lineTo(sam2PolygonPoints[i].x, sam2PolygonPoints[i].y)
+        }
+        ctx.closePath()
+        ctx.fill()
+
+        const maskData = canvas.toDataURL().split(',')[1]
+        console.log('SAM2: Saving edited mask', { objectId: editingObjectId, frameIdx: editingFrameIdx })
+
+        // Update the backend SAM2 session with the edited mask
+        try {
+          await dispatch(updateSAM2Mask({
+            sessionId: session.session_id,
+            frameIdx: editingFrameIdx,
+            objectId: editingObjectId,
+            mask: maskData
+          })).unwrap()
+          console.log('SAM2: Backend updated with edited mask - will be used for propagation!')
+        } catch (error) {
+          console.error('SAM2: Failed to update backend with edited mask:', error)
+          alert(`Failed to update mask: ${error}`)
+          return
+        }
+      }
+    }
+
+    // Exit editing mode
+    dispatch(stopBoundaryEditing())
+  }
+
+  const handleToggleRefinement = () => {
+    dispatch(toggleRefinementMode())
   }
 
   // Helper to format color for display
@@ -280,6 +363,49 @@ export const SAM2Controls = ({
             {/* Propagation controls */}
             <Divider sx={{ my: 2 }} />
 
+            {/* Edit Boundary / Done Editing buttons - shown when there's a mask on current frame */}
+            {hasMasksOnCurrentFrame && (
+              <Box sx={{ mb: 2 }}>
+                {!isEditingBoundary ? (
+                  <>
+                    <Alert severity="info" sx={{ mb: 1 }}>
+                      <Typography variant="body2">
+                        You can refine the mask boundary before propagating. Click below to edit the polygon.
+                      </Typography>
+                    </Alert>
+                    <Button
+                      variant="outlined"
+                      color="primary"
+                      startIcon={<Edit />}
+                      onClick={handleEditBoundary}
+                      disabled={isPropagating || isSaving}
+                      fullWidth
+                    >
+                      Edit Boundary (Polygon)
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Alert severity="success" sx={{ mb: 1 }}>
+                      <Typography variant="body2">
+                        <strong>Editing Mode:</strong> Drag nodes to adjust the boundary. Click "Done Editing" to save changes.
+                      </Typography>
+                    </Alert>
+                    <Button
+                      variant="contained"
+                      color="success"
+                      startIcon={<CheckCircle />}
+                      onClick={handleDoneEditing}
+                      disabled={isPropagating || isSaving}
+                      fullWidth
+                    >
+                      Done Editing
+                    </Button>
+                  </>
+                )}
+              </Box>
+            )}
+
             <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
               <Button
                 variant="contained"
@@ -290,6 +416,21 @@ export const SAM2Controls = ({
               >
                 {isPropagating ? 'Propagating...' : 'Propagate to All Frames'}
               </Button>
+
+              {/* Refinement Mode toggle - shown after propagation */}
+              {framesWithMasks > 1 && (
+                <Tooltip title="Enable refinement mode to click on any frame to correct drifted masks">
+                  <Button
+                    variant={isRefinementMode ? "contained" : "outlined"}
+                    color="info"
+                    startIcon={<Tune />}
+                    onClick={handleToggleRefinement}
+                    disabled={isPropagating || isSaving}
+                  >
+                    {isRefinementMode ? 'Refinement Mode ON' : 'Refinement Mode'}
+                  </Button>
+                </Tooltip>
+              )}
 
               <Tooltip title="Save all propagated masks to database for export">
                 <Button

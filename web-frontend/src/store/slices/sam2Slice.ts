@@ -36,6 +36,14 @@ interface SAM2State {
   saveError: string | null
   savedToDatabase: boolean
 
+  // Boundary editing state (for polygon editing before propagation)
+  isEditingBoundary: boolean
+  editingObjectId: number | null
+  editingFrameIdx: number | null
+
+  // Refinement state (for click-based corrections after propagation)
+  isRefinementMode: boolean
+
   // UI state
   pendingClick: { x: number; y: number; isPositive: boolean } | null
 }
@@ -56,6 +64,10 @@ const initialState: SAM2State = {
   saveProgress: 0,
   saveError: null,
   savedToDatabase: false,
+  isEditingBoundary: false,
+  editingObjectId: null,
+  editingFrameIdx: null,
+  isRefinementMode: false,
   pendingClick: null,
 }
 
@@ -138,6 +150,28 @@ export const refineSAM2Mask = createAsyncThunk(
   }
 )
 
+export const updateSAM2Mask = createAsyncThunk(
+  'sam2/updateMask',
+  async (request: {
+    sessionId: string
+    frameIdx: number
+    objectId: number
+    mask: string
+  }, { rejectWithValue }) => {
+    try {
+      const response = await sam2API.updateMask({
+        session_id: request.sessionId,
+        frame_idx: request.frameIdx,
+        object_id: request.objectId,
+        mask: request.mask,
+      })
+      return { frameIdx: request.frameIdx, response }
+    } catch (error: any) {
+      return rejectWithValue(error.message || 'Failed to update mask')
+    }
+  }
+)
+
 export const saveSAM2MasksToDatabase = createAsyncThunk(
   'sam2/saveToDatabase',
   async (
@@ -215,6 +249,38 @@ const sam2Slice = createSlice({
         state.frameMasks[frameIdx] = {}
       }
       state.frameMasks[frameIdx][objectId] = mask
+    },
+    // Boundary editing actions
+    startBoundaryEditing: (state, action: PayloadAction<{ objectId: number; frameIdx: number }>) => {
+      state.isEditingBoundary = true
+      state.editingObjectId = action.payload.objectId
+      state.editingFrameIdx = action.payload.frameIdx
+    },
+    stopBoundaryEditing: (state) => {
+      state.isEditingBoundary = false
+      state.editingObjectId = null
+      state.editingFrameIdx = null
+    },
+    updateMaskAfterBoundaryEdit: (state, action: PayloadAction<{ frameIdx: number; objectId: number; mask: string }>) => {
+      const { frameIdx, objectId, mask } = action.payload
+      if (!state.frameMasks[frameIdx]) {
+        state.frameMasks[frameIdx] = {}
+      }
+      state.frameMasks[frameIdx][objectId] = mask
+      // Exit boundary editing mode after updating mask
+      state.isEditingBoundary = false
+      state.editingObjectId = null
+      state.editingFrameIdx = null
+    },
+    // Refinement mode actions
+    enableRefinementMode: (state) => {
+      state.isRefinementMode = true
+    },
+    disableRefinementMode: (state) => {
+      state.isRefinementMode = false
+    },
+    toggleRefinementMode: (state) => {
+      state.isRefinementMode = !state.isRefinementMode
     },
     resetSAM2State: () => initialState,
   },
@@ -331,6 +397,15 @@ const sam2Slice = createSlice({
         state.frameMasks[frameIdx][response.object_id] = response.mask
       })
 
+      // Update mask
+      .addCase(updateSAM2Mask.fulfilled, (state, action) => {
+        const { frameIdx, response } = action.payload
+        if (!state.frameMasks[frameIdx]) {
+          state.frameMasks[frameIdx] = {}
+        }
+        state.frameMasks[frameIdx][response.object_id] = response.mask
+      })
+
       // Save to database
       .addCase(saveSAM2MasksToDatabase.pending, (state) => {
         state.isSaving = true
@@ -362,6 +437,12 @@ export const {
   setSaveProgress,
   clearSAM2Error,
   setFrameMask,
+  startBoundaryEditing,
+  stopBoundaryEditing,
+  updateMaskAfterBoundaryEdit,
+  enableRefinementMode,
+  disableRefinementMode,
+  toggleRefinementMode,
   resetSAM2State,
 } = sam2Slice.actions
 

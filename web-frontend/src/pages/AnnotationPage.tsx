@@ -3,13 +3,14 @@ import { SAM2Controls } from '@/components/annotation/SAM2Controls'
 import { VideoPlayer } from '@/components/annotation/VideoPlayer'
 import ExportDialog from '@/components/export/ExportDialog'
 import { addBox, addPoint, clearBoxes, clearPoints, resetAnnotationState, runSAMPrediction, setAwaitingDecision, setCurrentMask, setPromptType } from '@/store/slices/annotationSlice'
-import { addSAM2Object, setCurrentObjectId } from '@/store/slices/sam2Slice'
+import { addSAM2Object, refineSAM2Mask, setCurrentObjectId } from '@/store/slices/sam2Slice'
 import { fetchFrame, fetchVideo, setCurrentFrame } from '@/store/slices/videoSlice'
 import { AppDispatch, RootState } from '@/store/store'
 import { PolygonPoint } from '@/types'
 import { annotationAPI, projectAPI } from '@/utils/api'
 import { Add, FileDownload } from '@mui/icons-material'
 import {
+  Alert,
   Box,
   Button,
   Chip,
@@ -58,6 +59,11 @@ export const AnnotationPage = () => {
     nextObjectId: sam2NextObjectId,
     frameMasks: sam2FrameMasks,
     sessionLoading: sam2Loading,
+    isEditingBoundary: isSAM2EditingBoundary,
+    editingObjectId: sam2EditingObjectId,
+    editingFrameIdx: sam2EditingFrameIdx,
+    isRefinementMode: isSAM2RefinementMode,
+    currentObjectId: sam2CurrentObjectId,
   } = useSelector((state: RootState) => state.sam2)
 
   const [selectedCategory, setSelectedCategory] = useState('')
@@ -74,6 +80,19 @@ export const AnnotationPage = () => {
   const [existingAnnotations, setExistingAnnotations] = useState<any[]>([])
   const [selectedAnnotation, setSelectedAnnotation] = useState<any | null>(null) // For editing existing annotations
   const [editingAnnotationId, setEditingAnnotationId] = useState<number | null>(null) // Track which annotation we're editing
+
+  // SAM2 polygon editing state
+  const [sam2PolygonPoints, setSam2PolygonPoints] = useState<any[]>([])
+  const [sam2PolygonEditingMask, setSam2PolygonEditingMask] = useState<string | null>(null)
+
+  // Debug effect to monitor polygon points
+  useEffect(() => {
+    console.log('SAM2: Polygon points updated', {
+      count: sam2PolygonPoints.length,
+      points: sam2PolygonPoints.slice(0, 3),
+      isEditingBoundary: isSAM2EditingBoundary
+    })
+  }, [sam2PolygonPoints, isSAM2EditingBoundary])
 
   useEffect(() => {
     if (videoId) {
@@ -137,6 +156,40 @@ export const AnnotationPage = () => {
     loadCategories()
   }, [projectId, selectedCategory])
 
+  // Handle SAM2 boundary editing mode activation
+  useEffect(() => {
+    console.log('SAM2 boundary editing effect triggered', {
+      isSAM2EditingBoundary,
+      sam2EditingObjectId,
+      sam2EditingFrameIdx
+    })
+
+    if (isSAM2EditingBoundary && sam2EditingObjectId !== null && sam2EditingFrameIdx !== null) {
+      // Get the mask for the object being edited
+      const maskData = sam2FrameMasks[sam2EditingFrameIdx]?.[sam2EditingObjectId]
+      console.log('SAM2: Checking for mask data', {
+        frameIdx: sam2EditingFrameIdx,
+        objectId: sam2EditingObjectId,
+        hasMaskData: !!maskData,
+        maskDataLength: maskData?.length
+      })
+
+      if (maskData) {
+        console.log('SAM2: Starting boundary editing for object', sam2EditingObjectId, 'on frame', sam2EditingFrameIdx)
+        setSam2PolygonEditingMask(maskData)
+        // Convert mask to polygon using the same logic as original SAM
+        convertSAM2MaskToPolygon(maskData)
+      } else {
+        console.error('SAM2: No mask data found for editing!')
+      }
+    } else {
+      // Clear polygon editing state when not in boundary editing mode
+      console.log('SAM2: Clearing polygon editing state')
+      setSam2PolygonPoints([])
+      setSam2PolygonEditingMask(null)
+    }
+  }, [isSAM2EditingBoundary, sam2EditingObjectId, sam2EditingFrameIdx, sam2FrameMasks])
+
   const handleFrameChange = (frameNumber: number) => {
     if (videoId && frameNumber !== currentFrame) {
       // Clear annotation state when changing frames
@@ -152,6 +205,26 @@ export const AnnotationPage = () => {
 
     // Handle SAM 2 mode
     if (isSAM2Enabled && sam2Session) {
+      // If in refinement mode, refine the mask on the current frame
+      if (isSAM2RefinementMode && sam2CurrentObjectId !== null) {
+        console.log('SAM2: Refining mask for object', sam2CurrentObjectId, 'on frame', currentFrame)
+        try {
+          await dispatch(refineSAM2Mask({
+            sessionId: sam2Session.session_id,
+            frameIdx: currentFrame,
+            objectId: sam2CurrentObjectId,
+            points: [[x, y]],
+            labels: [isPositive ? 1 : 0],
+          })).unwrap()
+          console.log('SAM2: Mask refined successfully')
+        } catch (error) {
+          console.error('SAM2: Failed to refine mask:', error)
+          alert(`Failed to refine mask: ${error}`)
+        }
+        return
+      }
+
+      // Otherwise, add a new object
       console.log('SAM2: Adding object with point click')
       try {
         await dispatch(addSAM2Object({
@@ -646,20 +719,30 @@ export const AnnotationPage = () => {
     console.log('Starting contour tracing on', width, 'x', height, 'image')
 
     // Create a binary mask for easier processing
+    // Use threshold of 0 to catch all mask pixels
     const binaryMask = new Array(width * height).fill(0)
     let maskPixels = 0
+    let minVal = 255, maxVal = 0
+    let sampleVals = []
 
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         const idx = (y * width + x) * 4
-        if (data[idx] > 128) {
+        const pixelValue = data[idx]
+
+        if (sampleVals.length < 10) sampleVals.push(pixelValue)
+
+        if (pixelValue > 0) {  // Changed from 10 to 0 to catch all mask pixels
           binaryMask[y * width + x] = 1
           maskPixels++
+          minVal = Math.min(minVal, pixelValue)
+          maxVal = Math.max(maxVal, pixelValue)
         }
       }
     }
 
-    console.log('Found', maskPixels, 'mask pixels')
+    console.log('traceMaskContour: Found', maskPixels, 'mask pixels with threshold 0')
+    console.log('traceMaskContour: Pixel value range:', { min: minVal, max: maxVal, samples: sampleVals })
 
     if (maskPixels === 0) return []
 
@@ -756,7 +839,7 @@ export const AnnotationPage = () => {
         if (used.has(key)) continue
 
         const dist = Math.sqrt((pixel.x - current.x) ** 2 + (pixel.y - current.y) ** 2)
-        if (dist < nearestDist && dist <= 2) { // Only connect nearby pixels
+        if (dist < nearestDist && dist <= 5) { // Connect pixels within reasonable distance
           nearestDist = dist
           nearest = pixel
         }
@@ -833,6 +916,120 @@ export const AnnotationPage = () => {
     console.log('New mask generated from polygon editing')
   }
 
+  // SAM2 polygon editing handlers
+  const convertSAM2MaskToPolygon = (maskData: string) => {
+    console.log('SAM2: Converting mask to polygon for boundary editing', { maskDataLength: maskData.length })
+    // Reuse the existing mask-to-polygon conversion logic
+    const img = new Image()
+    img.onload = () => {
+      console.log('SAM2: Mask image loaded:', { width: img.width, height: img.height })
+
+      const canvas = document.createElement('canvas')
+      const ctx = canvas.getContext('2d')
+      if (!ctx) {
+        console.error('SAM2: Could not get canvas context')
+        return
+      }
+
+      // IMPORTANT: Don't resize the mask - work with original dimensions
+      // Then scale the polygon points to 640x480 later
+      canvas.width = img.width
+      canvas.height = img.height
+      ctx.drawImage(img, 0, 0)
+
+      const imageData = ctx.getImageData(0, 0, img.width, img.height)
+
+      // Check mask data - use lower threshold to handle antialiased edges
+      const data = imageData.data
+      let maskPixelCount = 0
+      let minValue = 255, maxValue = 0
+      let sampleValues = []
+      for (let i = 0; i < data.length; i += 4) {
+        const pixelValue = data[i]
+        if (pixelValue > 0) {
+          maskPixelCount++
+          minValue = Math.min(minValue, pixelValue)
+          maxValue = Math.max(maxValue, pixelValue)
+        }
+        if (sampleValues.length < 10) {
+          sampleValues.push(pixelValue)
+        }
+      }
+      console.log('SAM2: Mask pixel count:', maskPixelCount, 'dimensions:', img.width, 'x', img.height)
+      console.log('SAM2: Pixel value range:', { min: minValue, max: maxValue, samples: sampleValues })
+
+      // Trace contour using actual image dimensions
+      const contourPoints = traceMaskContour(imageData, img.width, img.height)
+      console.log('SAM2: Contour points found:', contourPoints.length)
+
+      if (contourPoints.length > 0) {
+        const simplifiedPoints = simplifyContour(contourPoints, 1.5)
+        console.log('SAM2: Contour has', contourPoints.length, 'raw points')
+        console.log('SAM2: Polygon created with', simplifiedPoints.length, 'simplified points', simplifiedPoints.slice(0, 5))
+
+        // Scale polygon points from original dimensions to 640x480 for consistency
+        const scaledPoints = simplifiedPoints.map(p => ({
+          x: Math.round((p.x / img.width) * 640),
+          y: Math.round((p.y / img.height) * 480)
+        }))
+        console.log('SAM2: Scaled polygon points to 640x480', scaledPoints.slice(0, 3))
+        setSam2PolygonPoints(scaledPoints)
+      } else {
+        console.warn('SAM2: Could not trace contour, using bounding box')
+        // Fallback to bounding box using actual image dimensions
+        let minX = img.width, maxX = 0, minY = img.height, maxY = 0
+        let foundMask = false
+        for (let y = 0; y < img.height; y++) {
+          for (let x = 0; x < img.width; x++) {
+            const idx = (y * img.width + x) * 4
+            if (data[idx] > 0) {  // Use threshold 0 instead of 128
+              minX = Math.min(minX, x)
+              maxX = Math.max(maxX, x)
+              minY = Math.min(minY, y)
+              maxY = Math.max(maxY, y)
+              foundMask = true
+            }
+          }
+        }
+
+        if (foundMask) {
+          // Scale bounding box to 640x480
+          const points = [
+            { x: Math.round((minX / img.width) * 640), y: Math.round((minY / img.height) * 480) },
+            { x: Math.round((maxX / img.width) * 640), y: Math.round((minY / img.height) * 480) },
+            { x: Math.round((maxX / img.width) * 640), y: Math.round((maxY / img.height) * 480) },
+            { x: Math.round((minX / img.width) * 640), y: Math.round((maxY / img.height) * 480) }
+          ]
+          console.log('SAM2: Using scaled bounding box points:', points)
+          setSam2PolygonPoints(points)
+        } else {
+          console.error('SAM2: No mask pixels found at all!')
+        }
+      }
+    }
+
+    img.onerror = (error) => {
+      console.error('SAM2: Failed to load mask image:', error)
+    }
+
+    // Handle base64 data URL format
+    if (maskData.startsWith('data:image')) {
+      console.log('SAM2: Using data URL format')
+      img.src = maskData
+    } else {
+      console.log('SAM2: Converting to data URL format')
+      img.src = `data:image/png;base64,${maskData}`
+    }
+  }
+
+  const handleSAM2PolygonChange = (points: any[]) => {
+    setSam2PolygonPoints(points)
+  }
+
+  const handleSAM2MaskGenerated = (_maskData: string) => {
+    // Don't auto-save - we'll save when "Done Editing" is clicked
+    console.log('SAM2: Mask generated from polygon (will save when Done Editing is clicked)')
+  }
 
   if (videoLoading) {
     return (
@@ -878,13 +1075,21 @@ export const AnnotationPage = () => {
         <Grid item xs={12} md={6}>
           <Paper sx={{ p: 2 }}>
             <Typography variant="h6" gutterBottom>
-              {editingMode === 'sam' ? 'Annotation Canvas' : 'Polygon Editor'}
+              {isSAM2EditingBoundary ? 'SAM2 Boundary Editor' : (editingMode === 'sam' ? 'Annotation Canvas' : 'Polygon Editor')}
             </Typography>
 
-            {editingMode === 'polygon' && (
+            {(editingMode === 'polygon' || isSAM2EditingBoundary) && (
               <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                 Drag nodes • Click edges to add nodes • Shift+click nodes to delete
               </Typography>
+            )}
+
+            {isSAM2RefinementMode && !isSAM2EditingBoundary && (
+              <Alert severity="info" sx={{ mb: 1 }}>
+                <Typography variant="body2">
+                  <strong>Refinement Mode Active:</strong> Left-click to add positive points, right-click for negative points to refine masks.
+                </Typography>
+              </Alert>
             )}
 
             <AnnotationCanvas
@@ -901,21 +1106,34 @@ export const AnnotationPage = () => {
               selectedPoints={isSAM2Enabled ? [] : selectedPoints}
               selectedBoxes={isSAM2Enabled ? [] : selectedBoxes}
               existingAnnotations={(() => {
+                console.log('SAM2: Building existingAnnotations for canvas', {
+                  isSAM2Enabled,
+                  isSAM2EditingBoundary,
+                  sam2EditingObjectId,
+                  currentFrame,
+                  hasMasks: !!sam2FrameMasks[currentFrame]
+                })
                 // In SAM 2 mode, show tracked object masks
                 if (isSAM2Enabled && sam2FrameMasks[currentFrame]) {
                   const sam2MaskColors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD'];
-                  return Object.entries(sam2FrameMasks[currentFrame]).map(([objectIdStr, mask], index) => {
-                    const objectId = parseInt(objectIdStr);
-                    const obj = sam2Objects.find(o => o.object_id === objectId);
-                    return {
-                      mask: `data:image/png;base64,${mask}`,
-                      category: obj?.category || 'SAM2 Object',
-                      color: obj ? `rgb(${obj.color[0]},${obj.color[1]},${obj.color[2]})` : sam2MaskColors[index % sam2MaskColors.length],
-                      annotationIndex: index,
-                      annotationId: objectId,
-                      isSelected: false
-                    };
-                  });
+                  return Object.entries(sam2FrameMasks[currentFrame])
+                    .map(([objectIdStr, mask], index) => {
+                      const objectId = parseInt(objectIdStr);
+                      const obj = sam2Objects.find(o => o.object_id === objectId);
+                      // Don't show the mask being edited (will show polygon instead)
+                      if (isSAM2EditingBoundary && objectId === sam2EditingObjectId) {
+                        return null;
+                      }
+                      return {
+                        mask: `data:image/png;base64,${mask}`,
+                        category: obj?.category || 'SAM2 Object',
+                        color: obj ? `rgb(${obj.color[0]},${obj.color[1]},${obj.color[2]})` : sam2MaskColors[index % sam2MaskColors.length],
+                        annotationIndex: index,
+                        annotationId: objectId,
+                        isSelected: false
+                      };
+                    })
+                    .filter((item): item is NonNullable<typeof item> => item !== null);
                 }
                 // Original mode: show existing annotations
                 const mapped = existingAnnotations.map((ann: any, index: number) => ({
@@ -930,10 +1148,22 @@ export const AnnotationPage = () => {
               })()}
               onAnnotationClick={handleAnnotationClick}
               selectedAnnotationId={selectedAnnotation?.id}
-              isPolygonMode={editingMode === 'polygon'}
-              polygonPoints={polygonPoints}
-              onPolygonChange={handlePolygonChange}
-              onMaskGenerated={handleMaskGenerated}
+              isPolygonMode={(() => {
+                const mode = isSAM2EditingBoundary ? true : (editingMode === 'polygon')
+                console.log('SAM2: AnnotationCanvas isPolygonMode', mode)
+                return mode
+              })()}
+              polygonPoints={(() => {
+                const points = isSAM2EditingBoundary ? sam2PolygonPoints : polygonPoints
+                console.log('SAM2: AnnotationCanvas polygonPoints', {
+                  isSAM2EditingBoundary,
+                  pointsCount: points.length,
+                  points: points.slice(0, 3)
+                })
+                return points
+              })()}
+              onPolygonChange={isSAM2EditingBoundary ? handleSAM2PolygonChange : handlePolygonChange}
+              onMaskGenerated={isSAM2EditingBoundary ? handleSAM2MaskGenerated : handleMaskGenerated}
             />
 
             {samLoading && editingMode === 'sam' && (
@@ -955,6 +1185,7 @@ export const AnnotationPage = () => {
             currentFrame={currentFrame}
             selectedCategory={selectedCategory}
             onObjectClick={(objectId) => dispatch(setCurrentObjectId(objectId))}
+            sam2PolygonPoints={sam2PolygonPoints}
           />
         </Grid>
 
@@ -1028,8 +1259,8 @@ export const AnnotationPage = () => {
 
               <Grid item xs={12} md={5}>
                 <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                  {/* Show selected annotation controls */}
-                  {selectedAnnotation ? (
+                  {/* Show nothing during SAM2 boundary editing - controls are in SAM2Controls panel */}
+                  {isSAM2EditingBoundary ? null : selectedAnnotation ? (
                     <>
                       <Chip
                         label={`Selected: ${selectedAnnotation.category_name || 'Unknown'}`}

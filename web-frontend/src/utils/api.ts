@@ -3,6 +3,16 @@ import {
   Project,
   SAMPredictionRequest,
   SAMPredictionResponse,
+  SAM2AddObjectRequest,
+  SAM2AddObjectResponse,
+  SAM2PropagateRequest,
+  SAM2PropagateResponse,
+  SAM2RefineRequest,
+  SAM2RefineResponse,
+  SAM2Session,
+  SAM2SessionStatus,
+  SAM2UpdateMaskRequest,
+  SAM2UpdateMaskResponse,
   User,
   Video
 } from '@/types'
@@ -491,6 +501,21 @@ export const sam2API = {
     } catch (error: any) {
       console.error('SAM2: Refinement failed:', error.response?.data || error.message)
       throw new Error(error.response?.data?.detail || 'Failed to refine mask')
+    }
+  },
+
+  /**
+   * Update a mask with a custom edited mask (e.g., from polygon editing)
+   */
+  updateMask: async (request: SAM2UpdateMaskRequest): Promise<SAM2UpdateMaskResponse> => {
+    try {
+      console.log('SAM2: Updating mask:', { ...request, mask: `${request.mask.substring(0, 50)}...` })
+      const response = await sam2Client.post('/update-mask', request)
+      console.log('SAM2: Mask updated:', response.data)
+      return response.data
+    } catch (error: any) {
+      console.error('SAM2: Update failed:', error.response?.data || error.message)
+      throw new Error(error.response?.data?.detail || 'Failed to update mask')
     }
   },
 
