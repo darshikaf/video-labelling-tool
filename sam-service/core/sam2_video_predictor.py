@@ -691,6 +691,7 @@ class SAM2VideoPredictor:
         results = {
             "session_id": session_id,
             "total_frames": session.total_frames,
+            "object_ids": list(session.objects.keys()),
             "frames": {},
         }
 

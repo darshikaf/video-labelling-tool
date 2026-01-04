@@ -145,7 +145,7 @@ class PropagateResponse(BaseModel):
 
     session_id: str = Field(..., description="Session identifier")
     total_frames: int = Field(..., description="Total frames processed")
-    frames: List[FrameMask] = Field(..., description="List of frame masks")
+    total_objects: int = Field(..., description="Total objects processed")
 
 
 # ============================================================
@@ -281,3 +281,34 @@ def decode_mask(mask_b64: str) -> np.ndarray:
     mask_bytes = base64.b64decode(mask_b64)
     mask_image = Image.open(io.BytesIO(mask_bytes))
     return np.array(mask_image)
+
+
+# ============================================================
+# Job Management (for async operations)
+# ============================================================
+
+
+class JobStatusResponse(BaseModel):
+    """Response with job status and result"""
+
+    job_id: str = Field(..., description="Job identifier")
+    job_type: str = Field(..., description="Type of job")
+    status: str = Field(
+        ..., description="Job status: pending, running, completed, failed"
+    )
+    progress: float = Field(..., description="Progress percentage (0-100)")
+    created_at: str = Field(..., description="Job creation timestamp")
+    started_at: Optional[str] = Field(None, description="Job start timestamp")
+    completed_at: Optional[str] = Field(None, description="Job completion timestamp")
+    result: Optional[Dict] = Field(None, description="Job result (when completed)")
+    error: Optional[str] = Field(None, description="Error message (when failed)")
+
+
+class PropagateJobResponse(BaseModel):
+    """Response when submitting propagation job (immediate return)"""
+
+    job_id: str = Field(..., description="Job identifier for polling")
+    status: str = Field(..., description="Initial job status")
+    message: str = Field(
+        ..., description="Human-readable message about job submission"
+    )

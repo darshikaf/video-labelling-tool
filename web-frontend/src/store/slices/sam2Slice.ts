@@ -172,6 +172,29 @@ export const updateSAM2Mask = createAsyncThunk(
   }
 )
 
+export const fetchFrameMasks = createAsyncThunk(
+  'sam2/fetchFrameMasks',
+  async (request: {
+    sessionId: string
+    frameIdx: number
+  }, { rejectWithValue, getState }) => {
+    try {
+      // Check if masks are already loaded for this frame
+      const state = getState() as { sam2: SAM2State }
+      if (state.sam2.frameMasks[request.frameIdx]) {
+        // Already loaded, return cached data
+        return { frameIdx: request.frameIdx, masks: state.sam2.frameMasks[request.frameIdx] }
+      }
+
+      // Fetch from server
+      const masks = await sam2API.getFrameMasks(request.sessionId, request.frameIdx)
+      return { frameIdx: request.frameIdx, masks }
+    } catch (error: any) {
+      return rejectWithValue(error.message || 'Failed to fetch frame masks')
+    }
+  }
+)
+
 export const saveSAM2MasksToDatabase = createAsyncThunk(
   'sam2/saveToDatabase',
   async (
@@ -359,29 +382,18 @@ const sam2Slice = createSlice({
         state.isPropagating = false
         state.propagationProgress = 100
 
-        // Store all propagated masks
+        // Response now only contains metadata - masks will be fetched on-demand
         const response = action.payload
-        for (const frameMask of response.frames) {
-          if (!state.frameMasks[frameMask.frame_idx]) {
-            state.frameMasks[frameMask.frame_idx] = {}
-          }
-          for (const [objectIdStr, mask] of Object.entries(frameMask.masks)) {
-            state.frameMasks[frameMask.frame_idx][parseInt(objectIdStr)] = mask
-          }
-        }
-
-        // Update object frame counts
-        for (const obj of state.objects) {
-          const framesWithMask = Object.keys(state.frameMasks).filter(
-            frameIdx => state.frameMasks[parseInt(frameIdx)][obj.object_id]
-          ).length
-          obj.frames_with_masks = framesWithMask
-        }
-
-        console.log('SAM2: Propagation complete', {
-          frames: response.frames.length,
-          objects: state.objects.length
+        console.log('SAM2: Propagation complete:', {
+          total_frames: response.total_frames,
+          total_objects: response.total_objects
         })
+
+        // Note: Object frame counts will be updated as masks are fetched on-demand
+        // For now, assume all frames have masks after propagation
+        for (const obj of state.objects) {
+          obj.frames_with_masks = response.total_frames
+        }
       })
       .addCase(propagateSAM2Masks.rejected, (state, action) => {
         state.isPropagating = false
@@ -404,6 +416,13 @@ const sam2Slice = createSlice({
           state.frameMasks[frameIdx] = {}
         }
         state.frameMasks[frameIdx][response.object_id] = response.mask
+      })
+
+      // Fetch frame masks on-demand
+      .addCase(fetchFrameMasks.fulfilled, (state, action) => {
+        const { frameIdx, masks } = action.payload
+        state.frameMasks[frameIdx] = masks
+        console.log(`SAM2: Fetched masks for frame ${frameIdx}`, masks)
       })
 
       // Save to database
