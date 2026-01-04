@@ -23,6 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 
+from core.job_manager import InMemoryJobManager, JobManager
 from core.sam2_video_predictor import SAM2VideoPredictor
 from schemas import (
     AddObjectRequest,
@@ -36,6 +37,8 @@ from schemas import (
     HealthResponse,
     InitializeSessionRequest,
     InitializeSessionResponse,
+    JobStatusResponse,
+    PropagateJobResponse,
     PropagateRequest,
     PropagateResponse,
     RefineRequest,
@@ -53,6 +56,9 @@ logger = logging.getLogger(__name__)
 # Global predictor instance
 sam2_predictor: Optional[SAM2VideoPredictor] = None
 cleanup_task: Optional[asyncio.Task] = None
+
+# Global job manager instance
+job_manager: Optional[JobManager] = None
 
 
 async def auto_cleanup_sessions():
@@ -75,9 +81,14 @@ async def auto_cleanup_sessions():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler"""
-    global sam2_predictor, cleanup_task
+    global sam2_predictor, cleanup_task, job_manager
 
     logger.info("Starting SAM 2 Video Annotation Service...")
+
+    # Initialize job manager
+    max_workers = int(os.getenv("JOB_MAX_WORKERS", "2"))
+    job_manager = InMemoryJobManager(max_workers=max_workers)
+    logger.info(f"Job manager initialized with {max_workers} workers")
 
     # Determine model directory (use env var or default)
     model_dir = os.getenv("MODEL_DIR", str(Path(__file__).parent / "models"))
@@ -110,12 +121,18 @@ async def lifespan(app: FastAPI):
     yield
 
     # Cleanup on shutdown
+    logger.info("Shutting down SAM 2 Video Annotation Service...")
+
     if cleanup_task:
         cleanup_task.cancel()
         try:
             await cleanup_task
         except asyncio.CancelledError:
             pass
+
+    if job_manager and isinstance(job_manager, InMemoryJobManager):
+        job_manager.shutdown()
+        logger.info("Job manager shut down")
 
     if sam2_predictor:
         for session_id in list(sam2_predictor.sessions.keys()):
@@ -359,34 +376,83 @@ async def add_object_with_box(request: AddObjectWithBoxRequest):
 # ============================================================
 
 
-@app.post("/propagate", response_model=PropagateResponse)
+@app.post("/propagate", response_model=PropagateJobResponse)
 async def propagate_masks(request: PropagateRequest):
     """
-    Propagate masks from annotated frames to all other frames.
+    Submit mask propagation job (returns immediately).
 
-    This is the core SAM 2 feature that tracks objects across the video.
+    This endpoint submits a background job for mask propagation and returns
+    a job ID. Use the /job/{job_id}/status endpoint to poll for completion.
+
+    Propagation can take 2-5 minutes depending on video length and hardware.
     """
     if not sam2_predictor:
         raise HTTPException(status_code=503, detail="SAM 2 service not initialized")
 
+    if not job_manager:
+        raise HTTPException(status_code=503, detail="Job manager not initialized")
+
     try:
-        result = sam2_predictor.propagate_masks(
-            session_id=request.session_id,
-            start_frame=request.start_frame,
-            end_frame=request.end_frame,
-            direction=request.direction or "both",
+        # Submit propagation as a background job
+        job_id = job_manager.submit_job(
+            job_type="propagate_masks",
+            task_func=sam2_predictor.propagate_masks,
+            params={
+                "session_id": request.session_id,
+                "start_frame": request.start_frame,
+                "end_frame": request.end_frame,
+                "direction": request.direction or "both",
+            },
         )
 
-        return PropagateResponse(
-            session_id=result["session_id"],
-            total_frames=result["total_frames"],
-            total_objects=len(result.get("object_ids", [])),
+        logger.info(f"Propagation job {job_id} submitted for session {request.session_id}")
+
+        return PropagateJobResponse(
+            job_id=job_id,
+            status="pending",
+            message=f"Propagation job submitted. Poll /job/{job_id}/status for progress.",
         )
+
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to propagate masks: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to propagate: {str(e)}")
+        logger.error(f"Failed to submit propagation job: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to submit propagation: {str(e)}"
+        )
+
+
+# ============================================================
+# Job Management Endpoints
+# ============================================================
+
+
+@app.get("/job/{job_id}/status", response_model=JobStatusResponse)
+async def get_job_status(job_id: str):
+    """
+    Get status of a background job.
+
+    Poll this endpoint to check propagation progress and retrieve results.
+    """
+    if not job_manager:
+        raise HTTPException(status_code=503, detail="Job manager not initialized")
+
+    job = job_manager.get_job(job_id)
+
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    return JobStatusResponse(
+        job_id=job.job_id,
+        job_type=job.job_type,
+        status=job.status.value,
+        progress=job.progress,
+        created_at=job.created_at.isoformat(),
+        started_at=job.started_at.isoformat() if job.started_at else None,
+        completed_at=job.completed_at.isoformat() if job.completed_at else None,
+        result=job.result,
+        error=job.error,
+    )
 
 
 # ============================================================

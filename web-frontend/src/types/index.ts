@@ -138,6 +138,28 @@ export interface SAM2FrameMask {
   masks: Record<number, string>  // object_id -> base64 mask
 }
 
+export interface SAM2PropagateJobResponse {
+  job_id: string
+  status: string
+  message: string
+}
+
+export interface SAM2JobStatus {
+  job_id: string
+  job_type: string
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  progress: number
+  created_at: string
+  started_at?: string
+  completed_at?: string
+  result?: {
+    session_id: string
+    total_frames: number
+    object_ids: number[]
+  }
+  error?: string
+}
+
 export interface SAM2PropagateResponse {
   session_id: string
   total_frames: number

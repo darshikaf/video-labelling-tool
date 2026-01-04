@@ -5,6 +5,8 @@ import {
   SAMPredictionResponse,
   SAM2AddObjectRequest,
   SAM2AddObjectResponse,
+  SAM2JobStatus,
+  SAM2PropagateJobResponse,
   SAM2PropagateRequest,
   SAM2PropagateResponse,
   SAM2RefineRequest,
@@ -468,21 +470,63 @@ export const sam2API = {
   },
 
   /**
-   * Propagate masks across all frames
+   * Get job status
+   */
+  getJobStatus: async (jobId: string): Promise<SAM2JobStatus> => {
+    const response = await sam2Client.get(`/job/${jobId}/status`)
+    return response.data
+  },
+
+  /**
+   * Propagate masks across all frames (async with polling)
    */
   propagate: async (
     request: SAM2PropagateRequest,
     onProgress?: (progress: number) => void
   ): Promise<SAM2PropagateResponse> => {
     try {
-      console.log('SAM2: Starting propagation:', request)
-      const response = await sam2Client.post('/propagate', request)
-      console.log('SAM2: Propagation complete:', {
-        session_id: response.data.session_id,
-        total_frames: response.data.total_frames,
-        frames_count: response.data.frames?.length
+      console.log('SAM2: Submitting propagation job:', request)
+
+      // Submit job
+      const submitResponse = await sam2Client.post<SAM2PropagateJobResponse>('/propagate', request)
+      const { job_id } = submitResponse.data
+
+      console.log('SAM2: Job submitted:', job_id)
+
+      // Poll for completion
+      return await new Promise<SAM2PropagateResponse>((resolve, reject) => {
+        const pollInterval = setInterval(async () => {
+          try {
+            const status = await sam2API.getJobStatus(job_id)
+
+            // Update progress if callback provided
+            if (onProgress) {
+              onProgress(status.progress)
+            }
+
+            console.log(`SAM2: Job ${job_id} status: ${status.status} (${status.progress}%)`)
+
+            if (status.status === 'completed') {
+              clearInterval(pollInterval)
+              if (status.result) {
+                resolve({
+                  session_id: status.result.session_id,
+                  total_frames: status.result.total_frames,
+                  total_objects: status.result.object_ids?.length || 0
+                })
+              } else {
+                reject(new Error('Job completed but no result returned'))
+              }
+            } else if (status.status === 'failed') {
+              clearInterval(pollInterval)
+              reject(new Error(status.error || 'Propagation failed'))
+            }
+          } catch (pollError: any) {
+            clearInterval(pollInterval)
+            reject(pollError)
+          }
+        }, 2000) // Poll every 2 seconds
       })
-      return response.data
     } catch (error: any) {
       console.error('SAM2: Propagation failed:', error.response?.data || error.message)
       throw new Error(error.response?.data?.detail || 'Failed to propagate masks')
