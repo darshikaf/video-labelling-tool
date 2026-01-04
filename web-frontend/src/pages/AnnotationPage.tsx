@@ -3,7 +3,7 @@ import { SAM2Controls } from '@/components/annotation/SAM2Controls'
 import { VideoPlayer } from '@/components/annotation/VideoPlayer'
 import ExportDialog from '@/components/export/ExportDialog'
 import { addBox, addPoint, clearBoxes, clearPoints, resetAnnotationState, runSAMPrediction, setAwaitingDecision, setCurrentMask, setPromptType } from '@/store/slices/annotationSlice'
-import { addSAM2Object, refineSAM2Mask, setCurrentObjectId } from '@/store/slices/sam2Slice'
+import { addSAM2Object, fetchFrameMasks, refineSAM2Mask, setCurrentObjectId } from '@/store/slices/sam2Slice'
 import { fetchFrame, fetchVideo, setCurrentFrame } from '@/store/slices/videoSlice'
 import { AppDispatch, RootState } from '@/store/store'
 import { PolygonPoint } from '@/types'
@@ -129,6 +129,46 @@ export const AnnotationPage = () => {
     }
     fetchExistingAnnotations()
   }, [videoId, currentFrame])
+
+  // Fetch SAM2 frame masks on-demand when frame changes
+  useEffect(() => {
+    if (isSAM2Enabled && sam2Session && currentFrame >= 0) {
+      // Only fetch if we don't already have masks for this frame
+      if (!sam2FrameMasks[currentFrame]) {
+        console.log(`SAM2: Fetching masks for frame ${currentFrame}`)
+        dispatch(fetchFrameMasks({
+          sessionId: sam2Session.session_id,
+          frameIdx: currentFrame
+        }))
+      }
+    }
+  }, [dispatch, isSAM2Enabled, sam2Session, currentFrame, sam2FrameMasks])
+
+  // Prefetch adjacent frames for smoother scrubbing (optional optimization)
+  useEffect(() => {
+    if (isSAM2Enabled && sam2Session && currentFrame >= 0 && currentVideo) {
+      const totalFrames = currentVideo.total_frames || 0
+
+      // Prefetch next 2-3 frames in the background (don't block UI)
+      const framesToPrefetch = [
+        currentFrame + 1,
+        currentFrame + 2,
+        currentFrame - 1, // Also prefetch previous frame
+      ].filter(f => f >= 0 && f < totalFrames && !sam2FrameMasks[f])
+
+      // Use setTimeout to defer prefetching (low priority)
+      const timeoutId = setTimeout(() => {
+        framesToPrefetch.forEach(frameIdx => {
+          dispatch(fetchFrameMasks({
+            sessionId: sam2Session.session_id,
+            frameIdx
+          }))
+        })
+      }, 100) // Wait 100ms before prefetching
+
+      return () => clearTimeout(timeoutId)
+    }
+  }, [dispatch, isSAM2Enabled, sam2Session, currentFrame, currentVideo, sam2FrameMasks])
 
   // Load project categories
   useEffect(() => {

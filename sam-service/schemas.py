@@ -145,7 +145,7 @@ class PropagateResponse(BaseModel):
 
     session_id: str = Field(..., description="Session identifier")
     total_frames: int = Field(..., description="Total frames processed")
-    frames: List[FrameMask] = Field(..., description="List of frame masks")
+    total_objects: int = Field(..., description="Total objects processed")
 
 
 # ============================================================

@@ -20,6 +20,7 @@ from typing import Optional
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 
 from core.sam2_video_predictor import SAM2VideoPredictor
@@ -136,6 +137,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
 # ============================================================
@@ -374,21 +377,10 @@ async def propagate_masks(request: PropagateRequest):
             direction=request.direction or "both",
         )
 
-        # Convert to response format
-        frames = []
-        for frame_idx, frame_masks in result["frames"].items():
-            masks_encoded = {
-                obj_id: encode_mask(mask) for obj_id, mask in frame_masks.items()
-            }
-            frames.append(FrameMask(frame_idx=frame_idx, masks=masks_encoded))
-
-        # Sort by frame index
-        frames.sort(key=lambda f: f.frame_idx)
-
         return PropagateResponse(
             session_id=result["session_id"],
             total_frames=result["total_frames"],
-            frames=frames,
+            total_objects=len(result.get("object_ids", [])),
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

@@ -141,7 +141,7 @@ export interface SAM2FrameMask {
 export interface SAM2PropagateResponse {
   session_id: string
   total_frames: number
-  frames: SAM2FrameMask[]
+  total_objects: number
 }
 
 export interface SAM2RefineRequest {
